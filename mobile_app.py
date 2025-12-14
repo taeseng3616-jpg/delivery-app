@@ -97,7 +97,6 @@ def set_goal(amount):
     except: pass
 
 # --- [핵심] 숫자 변환 도우미 함수 ---
-# 콤마(,)가 있는 문자열도 안전하게 숫자로 바꿔줍니다.
 def safe_numeric(series):
     return pd.to_numeric(series.astype(str).str.replace(',', ''), errors='coerce').fillna(0)
 
@@ -113,7 +112,7 @@ df_work = load_data(SHEET_WORK)
 df_bank = load_data(SHEET_BANK)
 df_maint = load_data(SHEET_MAINT)
 
-# 2. [중요] 데이터를 숫자로 변환 (이 부분이 추가되어야 오류가 안 납니다)
+# 2. 숫자 변환
 if not df_work.empty:
     for col in ['쿠팡수입', '배민수입', '총수입', '지출', '순수익', '배달건수']:
         if col in df_work.columns:
@@ -134,7 +133,6 @@ current_profit = 0
 current_count = 0
 if not df_work.empty:
     current_month = datetime.now().strftime("%Y-%m")
-    # 날짜 필터링을 위해 문자열로 처리
     month_data = df_work[df_work['날짜'].astype(str).str.contains(current_month, na=False)]
     current_profit = month_data['순수익'].sum()
     current_count = month_data['배달건수'].sum()
@@ -217,7 +215,6 @@ with tab2:
     st.subheader("📋 입금 전체 내역 (수정/삭제)")
 
     if not df_bank.empty:
-        # 날짜순 정렬
         sorted_bank = df_bank.sort_values(by="입금날짜", ascending=False)
         edited_bank = st.data_editor(
             sorted_bank,
@@ -234,21 +231,48 @@ with tab2:
     else:
         st.info("입금 내역이 없습니다.")
 
-# ================= [탭 3] 정비 관리 =================
+# ================= [탭 3] 정비 관리 (수정됨: 직접 입력 기능 추가) =================
 with tab3:
     st.header("🛠️ 오토바이 정비 입력")
+    
+    # 1. 항목 리스트 정의 (요청하신 항목 반영)
+    maint_items = [
+        "휘발유", "오일교환", "미션오일", "브레이크(앞)", "브레이크(뒤)", 
+        "에어필터", "구동벨트", "웨이트롤러", "배터리", "점화플러그", 
+        "브레이크오일", "냉각수", "구동계", "타이어(앞)", "타이어(뒤)", 
+        "보험료", "백미러"
+    ]
+
     with st.container(border=True):
-        with st.form("maint_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            d = col1.date_input("날짜", datetime.now())
-            i = col2.selectbox("항목", ["휘발유", "오일교환", "타이어", "브레이크", "기타"])
-            c = st.number_input("비용(원)", step=1000)
-            k = st.text_input("현재 주행거리(Km)")
-            m = st.text_input("정비 내용/메모")
+        # *주의*: '직접 입력' 기능을 위해 여기서는 st.form을 쓰지 않고 바로 입력받습니다.
+        # (form을 쓰면 '직접 입력' 선택 시 입력창이 바로 안 뜨기 때문입니다)
+        
+        col1, col2 = st.columns(2)
+        d = col1.date_input("날짜", datetime.now())
+        
+        # '직접 입력' 옵션 추가
+        selected_item = col2.selectbox("정비 항목", maint_items + ["직접 입력"])
+        
+        # '직접 입력' 선택 시에만 텍스트 입력창 보여주기
+        if selected_item == "직접 입력":
+            final_item = st.text_input("✏️ 항목 이름을 직접 입력하세요")
+        else:
+            final_item = selected_item
             
-            if st.form_submit_button("💾 정비 기록 저장", type="primary"):
-                save_new_entry(SHEET_MAINT, [d, i, c, k, m])
-                st.success("✅ 정비 기록 저장 완료!")
+        c = st.number_input("비용(원)", step=1000)
+        k = st.text_input("현재 주행거리(Km)")
+        m = st.text_input("정비 내용/메모")
+        
+        # 저장 버튼 (form이 없으므로 누르면 바로 실행됨)
+        if st.button("💾 정비 기록 저장", type="primary"):
+            if not final_item:
+                st.warning("⚠️ 항목을 입력해주세요!")
+            else:
+                save_new_entry(SHEET_MAINT, [d, final_item, c, k, m])
+                st.success(f"✅ [{final_item}] 정비 기록 저장 완료!")
+                # 잠시 후 새로고침
+                import time
+                time.sleep(1)
                 st.rerun()
 
     st.write("---")
@@ -281,9 +305,7 @@ with tab4:
         
         st.write("### 📅 최근 7일 수익 변화")
         chart_data = df_work.copy()
-        # 날짜 형식이 올바른지 확인 후 변환
         chart_data['날짜'] = pd.to_datetime(chart_data['날짜'], errors='coerce')
-        # 날짜가 변환되지 않은 행 제거
         chart_data = chart_data.dropna(subset=['날짜'])
         
         if not chart_data.empty:
