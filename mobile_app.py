@@ -1,100 +1,128 @@
 import streamlit as st
 import pandas as pd
-import os
-import csv
+import gspread
 from datetime import datetime
 
 # 1. 페이지 설정
 st.set_page_config(page_title="배달 CEO 장부", page_icon="🛵", layout="centered")
 
-# 파일 이름 설정
-FILE_WORK = "daily_log.csv"
-FILE_BANK = "deposit_log.csv"
-FILE_MAINT = "maintenance_log.csv"
-FILE_GOAL = "goal.txt"
+# --- 구글 시트 연결 설정 ---
+try:
+    gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
+    # 사장님 시트 주소 (변경 없음)
+    url = "https://docs.google.com/spreadsheets/d/1vNdErX9sW6N5ulvfr-ndcrGmutxwiuvfe2og87AOEnI"
+    sh = gc.open_by_url(url)
+except Exception as e:
+    st.error(f"⚠️ 구글 시트 연결 실패! 잠시 후 새로고침 해주세요.\n{e}")
+    st.stop()
 
-# --- 초기화 함수 (건수 항목 추가됨) ---
-def init_files():
-    if not os.path.exists(FILE_WORK):
-        with open(FILE_WORK, "w", newline="", encoding="utf-8-sig") as f:
-            # 헤더에 '배달건수' 추가
-            csv.writer(f).writerow(["날짜", "쿠팡수입", "배민수입", "총수입", "지출", "순수익", "배달건수", "주행거리(km)", "메모"])
-    if not os.path.exists(FILE_BANK):
-        with open(FILE_BANK, "w", newline="", encoding="utf-8-sig") as f:
-            csv.writer(f).writerow(["입금날짜", "입금처", "입금액", "메모"])
-    if not os.path.exists(FILE_MAINT):
-        with open(FILE_MAINT, "w", newline="", encoding="utf-8-sig") as f:
-            csv.writer(f).writerow(["날짜", "항목", "금액", "당시주행거리", "메모"])
-    if not os.path.exists(FILE_GOAL):
-        with open(FILE_GOAL, "w") as f: f.write("3000000")
-
-init_files()
+# 시트 이름 정의 (엑셀 아래쪽 탭 이름)
+SHEET_WORK = "매출기록"
+SHEET_BANK = "입금기록"
+SHEET_MAINT = "정비기록"
+SHEET_GOAL = "목표설정"
 
 # --- 데이터 로드 함수 ---
-def load_data(file_name):
-    if os.path.exists(file_name):
-        try:
-            df = pd.read_csv(file_name)
-            # 옛날 파일이라 '배달건수' 칸이 없으면 0으로 채워서 에러 방지
-            if file_name == FILE_WORK and '배달건수' not in df.columns:
-                df['배달건수'] = 0
-            return df
-        except:
-            return pd.DataFrame()
-    return pd.DataFrame()
+def load_data(sheet_name):
+    try:
+        worksheet = sh.worksheet(sheet_name)
+        data = worksheet.get_all_records()
+        df = pd.DataFrame(data)
+        
+        # 데이터가 없어도 빈 표는 보여주기 (헤더 생성)
+        if df.empty:
+            if sheet_name == SHEET_WORK:
+                return pd.DataFrame(columns=["날짜", "쿠팡수입", "배민수입", "총수입", "지출", "순수익", "배달건수", "주행거리", "메모"])
+            elif sheet_name == SHEET_BANK:
+                return pd.DataFrame(columns=["입금날짜", "입금처", "입금액", "메모"])
+            elif sheet_name == SHEET_MAINT:
+                return pd.DataFrame(columns=["날짜", "항목", "금액", "당시주행거리", "메모"])
+        return df
+    except:
+        return pd.DataFrame()
 
-# --- 저장 함수 ---
-def save_to_csv(file_name, data_list):
-    with open(file_name, "a", newline="", encoding="utf-8-sig") as f:
-        writer = csv.writer(f)
-        writer.writerow(data_list)
+# --- 데이터 저장 함수 (구글 시트에 추가) ---
+def save_entry(sheet_name, data_list):
+    worksheet = sh.worksheet(sheet_name)
+    # 시트가 텅 비었으면 제목줄(헤더)부터 만듦
+    if not worksheet.get_all_values():
+        if sheet_name == SHEET_WORK:
+            worksheet.append_row(["날짜", "쿠팡수입", "배민수입", "총수입", "지출", "순수익", "배달건수", "주행거리", "메모"])
+        elif sheet_name == SHEET_BANK:
+            worksheet.append_row(["입금날짜", "입금처", "입금액", "메모"])
+        elif sheet_name == SHEET_MAINT:
+            worksheet.append_row(["날짜", "항목", "금액", "당시주행거리", "메모"])
+    
+    # 데이터 한 줄 추가 (모두 문자로 변환해서 안전하게 저장)
+    worksheet.append_row([str(x) for x in data_list])
 
-# --- 사이드바 ---
+# --- 삭제 함수 (행 번호로 삭제) ---
+def delete_entry(sheet_name, row_index):
+    worksheet = sh.worksheet(sheet_name)
+    # 구글 시트는 1부터 시작 + 헤더 1줄 고려 -> index + 2
+    worksheet.delete_rows(row_index + 2)
+
+# --- 목표 관리 ---
+def get_goal():
+    try:
+        worksheet = sh.worksheet(SHEET_GOAL)
+        val = worksheet.acell('A1').value
+        return int(val) if val else 3000000
+    except: return 3000000
+
+def set_goal(amount):
+    try:
+        worksheet = sh.worksheet(SHEET_GOAL)
+        worksheet.update('A1', str(amount))
+    except: pass
+
+# --- 사이드바: 목표 및 현황 ---
 st.sidebar.header("🏆 목표 관리")
-try:
-    with open(FILE_GOAL, "r") as f:
-        goal_amount = int(f.read().strip())
-except:
-    goal_amount = 3000000
+goal_amount = get_goal()
 
-df_work = load_data(FILE_WORK)
+# 이번 달 데이터 계산
+df_work = load_data(SHEET_WORK)
 current_profit = 0
 current_count = 0
 
 if not df_work.empty:
     current_month = datetime.now().strftime("%Y-%m")
     df_work['날짜'] = df_work['날짜'].astype(str)
-    month_data = df_work[df_work['날짜'].str.startswith(current_month)]
     
+    # 콤마 제거 및 숫자 변환 (에러 방지)
+    for col in ['순수익', '배달건수']:
+        if col in df_work.columns:
+            df_work[col] = pd.to_numeric(df_work[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+    
+    month_data = df_work[df_work['날짜'].str.contains(current_month, na=False)]
     if not month_data.empty:
         current_profit = month_data['순수익'].sum()
         current_count = month_data['배달건수'].sum()
 
 progress = min(current_profit / goal_amount, 1.0) if goal_amount > 0 else 0
 st.sidebar.progress(progress)
-st.sidebar.write(f"수익: **{current_profit:,}원** ({progress*100:.1f}%)")
-st.sidebar.write(f"배달: **{int(current_count)}건**") # 사이드바에도 건수 표시
+st.sidebar.write(f"수익: **{int(current_profit):,}원** ({progress*100:.1f}%)")
+st.sidebar.write(f"배달: **{int(current_count)}건**")
 st.sidebar.write(f"목표: {goal_amount:,}원")
 
 new_goal = st.sidebar.number_input("목표 금액 수정", value=goal_amount, step=100000)
 if st.sidebar.button("목표 저장"):
-    with open(FILE_GOAL, "w") as f: f.write(str(new_goal))
+    set_goal(new_goal)
     st.sidebar.success("저장됨")
     st.rerun()
 
 # --- 메인 화면 ---
 st.title("🛵 배달 CEO 통합 관리")
 
-# 탭 이름 변경: 일별장부 -> 배달매출
+# 탭 구성
 tab1, tab2, tab3, tab4 = st.tabs(["📝배달매출", "💰입금관리", "🛠️정비관리", "📊통계"])
 
-# [탭 1] 배달 매출 (건수 입력 추가)
+# [탭 1] 배달 매출
 with tab1:
     st.subheader("오늘 매출 입력")
     with st.form("work_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         date = col1.date_input("날짜", datetime.now())
-        # [추가] 배달 건수 입력칸
         count = col2.number_input("배달 건수(건)", min_value=0, step=1)
         
         c1, c2 = st.columns(2)
@@ -110,29 +138,32 @@ with tab1:
         if st.form_submit_button("저장하기"):
             total = coupang + baemin
             net = total - expense
-            # 저장 순서: 날짜, 쿠팡, 배민, 총합, 지출, 순수익, [건수], 거리, 메모
-            save_to_csv(FILE_WORK, [date, coupang, baemin, total, expense, net, count, distance, memo])
-            st.success("저장 완료!")
+            # 구글 시트로 전송!
+            save_entry(SHEET_WORK, [date, coupang, baemin, total, expense, net, count, distance, memo])
+            st.success("구글 시트에 저장 완료!")
             st.rerun()
-    
+
     st.divider()
+    
+    # 목록 및 삭제 기능
     st.subheader("📋 최근 매출 기록")
     if not df_work.empty:
-        # 보기 좋게 컬럼 순서 정리해서 보여주기
-        cols = ['날짜', '순수익', '배달건수', '쿠팡수입', '배민수입', '지출', '주행거리(km)', '메모']
-        # 실제 파일에 있는 컬럼만 골라서 표시 (에러 방지)
-        display_cols = [c for c in cols if c in df_work.columns]
+        # 화면 표시용 데이터
+        st.dataframe(df_work.sort_values(by="날짜", ascending=False).head(5), use_container_width=True)
         
-        df_display = df_work.sort_values(by="날짜", ascending=False)
-        st.dataframe(df_display[display_cols], use_container_width=True)
-        
-        # 삭제 기능
-        delete_date = st.selectbox("삭제할 날짜 선택", df_display['날짜'].unique())
-        if st.button("선택한 날짜 기록 삭제"):
-            df_work = df_work[df_work['날짜'] != delete_date]
-            df_work.to_csv(FILE_WORK, index=False, encoding="utf-8-sig")
-            st.warning("삭제되었습니다.")
-            st.rerun()
+        with st.expander("🗑️ 기록 삭제하기 (클릭)"):
+            # 삭제할 리스트 만들기
+            df_work['label'] = df_work['날짜'].astype(str) + " | 순수익: " + df_work['순수익'].astype(str) + "원"
+            del_list = df_work['label'].tolist()[::-1] # 최신순 정렬
+            
+            selected_del = st.selectbox("삭제할 항목 선택", del_list, key="del_work")
+            
+            if st.button("❌ 선택한 항목 삭제"):
+                # 선택한 항목의 원래 인덱스 찾기
+                idx = df_work[df_work['label'] == selected_del].index[0]
+                delete_entry(SHEET_WORK, idx)
+                st.success("삭제되었습니다.")
+                st.rerun()
 
 # [탭 2] 입금 관리
 with tab2:
@@ -144,13 +175,20 @@ with tab2:
         b_memo = st.text_input("메모")
         
         if st.form_submit_button("입금 저장"):
-            save_to_csv(FILE_BANK, [b_date, b_source, b_amount, b_memo])
-            st.success("저장됨")
+            save_entry(SHEET_BANK, [b_date, b_source, b_amount, b_memo])
+            st.success("입금 저장됨")
             st.rerun()
             
-    df_bank = load_data(FILE_BANK)
+    df_bank = load_data(SHEET_BANK)
     if not df_bank.empty:
-        st.dataframe(df_bank.sort_values(by="입금날짜", ascending=False), use_container_width=True)
+        st.dataframe(df_bank.sort_values(by="입금날짜", ascending=False).head(5), use_container_width=True)
+        with st.expander("🗑️ 입금 삭제"):
+            df_bank['label'] = df_bank['입금날짜'].astype(str) + " | " + df_bank['입금액'].astype(str) + "원"
+            sel_bank = st.selectbox("삭제할 입금", df_bank['label'].tolist()[::-1], key="del_bank")
+            if st.button("입금 삭제"):
+                idx = df_bank[df_bank['label'] == sel_bank].index[0]
+                delete_entry(SHEET_BANK, idx)
+                st.rerun()
 
 # [탭 3] 정비 관리
 with tab3:
@@ -163,21 +201,28 @@ with tab3:
         m_memo = st.text_input("내용")
         
         if st.form_submit_button("정비 저장"):
-            save_to_csv(FILE_MAINT, [m_date, m_item, m_cost, m_km, m_memo])
-            st.success("저장됨")
+            save_entry(SHEET_MAINT, [m_date, m_item, m_cost, m_km, m_memo])
+            st.success("정비 저장됨")
             st.rerun()
 
-    df_maint = load_data(FILE_MAINT)
+    df_maint = load_data(SHEET_MAINT)
     if not df_maint.empty:
-        st.dataframe(df_maint.sort_values(by="날짜", ascending=False), use_container_width=True)
+        st.dataframe(df_maint.sort_values(by="날짜", ascending=False).head(5), use_container_width=True)
+        with st.expander("🗑️ 정비 삭제"):
+            df_maint['label'] = df_maint['날짜'].astype(str) + " | " + df_maint['항목']
+            sel_maint = st.selectbox("삭제할 정비", df_maint['label'].tolist()[::-1], key="del_maint")
+            if st.button("정비 삭제"):
+                idx = df_maint[df_maint['label'] == sel_maint].index[0]
+                delete_entry(SHEET_MAINT, idx)
+                st.rerun()
 
 # [탭 4] 통계
 with tab4:
     st.subheader("📊 매출 분석")
     if not df_work.empty:
         col_a, col_b = st.columns(2)
-        col_a.metric("이번 달 순수익", f"{current_profit:,} 원")
-        col_b.metric("이번 달 배달건수", f"{int(current_count)} 건") # 통계에도 건수 추가
+        col_a.metric("이번 달 순수익", f"{int(current_profit):,} 원")
+        col_b.metric("이번 달 배달건수", f"{int(current_count)} 건")
 
         st.write("📉 최근 7일 순수익 추이")
         chart_data = df_work.tail(7).copy()
@@ -185,7 +230,3 @@ with tab4:
         st.bar_chart(chart_data['순수익'])
     else:
         st.info("데이터가 없습니다.")
-        
-    st.divider()
-    with open(FILE_WORK, "rb") as f:
-        st.download_button("💾 엑셀(CSV)로 다운로드", f, file_name="매출장부.csv", mime="text/csv")
