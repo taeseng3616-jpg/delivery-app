@@ -12,7 +12,7 @@ try:
     # [주의] 본인의 구글 시트 주소로 꼭 확인하세요! (URL 방식이 가장 확실함)
     # 아래 주소는 예시이므로, 본인의 시트 주소가 코드에 잘 들어있는지 확인해주세요.
     # 만약 에러가 나면 기존에 잘 되던 방식(open_by_url 등)을 그대로 쓰셔도 됩니다.
-    url = "https://docs.google.com/spreadsheets/d/1XyZ..." # 여기에 본인 주소 넣으셨죠?
+    url = "https://docs.google.com/spreadsheets/d/1vNdErX9sW6N5ulvfr-ndcrGmutxwiuvfe2og87AOEnI/edit?gid=0#gid=0" # 여기에 본인 주소 넣으셨죠?
     # 혹시 주소 넣는 게 번거로우시면 아래처럼 이름으로 찾기도 가능합니다.
     sh = gc.open("매출장부_DB") 
 except Exception:
@@ -209,3 +209,4 @@ with tab4:
         chart_df = df_work.copy()
         chart_df = chart_df.set_index("날짜").sort_index()
         st.line_chart(chart_df['순수익'])
+
