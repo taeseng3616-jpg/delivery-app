@@ -4,7 +4,7 @@ import gspread
 from datetime import datetime
 
 # 1. 페이지 설정
-st.set_page_config(page_title="배달 CEO 장부", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="매출 입력", page_icon="🛵", layout="centered")
 
 # --- 구글 시트 연결 ---
 try:
@@ -315,3 +315,4 @@ with tab4:
             st.info("날짜 데이터가 올바르지 않습니다.")
     else:
         st.info("데이터가 충분하지 않습니다.")
+
