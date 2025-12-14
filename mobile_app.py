@@ -8,7 +8,10 @@ st.set_page_config(page_title="배달 CEO 장부", page_icon="🛵", layout="cen
 
 # --- 구글 시트 연결 ---
 try:
+    # st.secrets를 사용하거나, json 파일 경로를 직접 입력하세요.
+    # 로컬 테스트 시에는 json 파일 경로를 사용하시는 것이 편할 수 있습니다.
     gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
+    
     # 사장님 시트 주소
     url = "https://docs.google.com/spreadsheets/d/1vNdErX9sW6N5ulvfr-ndcrGmutxwiuvfe2og87AOEnI"
     sh = gc.open_by_url(url)
@@ -22,13 +25,14 @@ SHEET_BANK = "입금기록"
 SHEET_MAINT = "정비기록"
 SHEET_GOAL = "목표설정"
 
-# --- 데이터 로드 ---
+# --- 데이터 로드 함수 ---
 def load_data(sheet_name):
     try:
         worksheet = sh.worksheet(sheet_name)
         data = worksheet.get_all_records()
         df = pd.DataFrame(data)
-        # 데이터 없어도 헤더 생성
+        
+        # 데이터가 없을 때 빈 DataFrame 생성 (헤더 포함)
         if df.empty:
             if sheet_name == SHEET_WORK:
                 return pd.DataFrame(columns=["날짜", "쿠팡수입", "배민수입", "총수입", "지출", "순수익", "배달건수", "주행거리", "메모"])
@@ -43,6 +47,7 @@ def load_data(sheet_name):
 # --- 데이터 추가 (한 줄 저장) ---
 def save_new_entry(sheet_name, data_list):
     worksheet = sh.worksheet(sheet_name)
+    # 시트가 비어있다면 헤더 추가
     if not worksheet.get_all_values():
         if sheet_name == SHEET_WORK:
             worksheet.append_row(["날짜", "쿠팡수입", "배민수입", "총수입", "지출", "순수익", "배달건수", "주행거리", "메모"])
@@ -50,13 +55,15 @@ def save_new_entry(sheet_name, data_list):
             worksheet.append_row(["입금날짜", "입금처", "입금액", "메모"])
         elif sheet_name == SHEET_MAINT:
             worksheet.append_row(["날짜", "항목", "금액", "당시주행거리", "메모"])
+    
+    # 데이터 추가
     worksheet.append_row([str(x) for x in data_list])
 
-# --- [핵심] 통째로 업데이트 (수정 반영용) ---
+# --- [핵심] 통째로 업데이트 (수정/삭제 반영용) ---
 def update_entire_sheet(sheet_name, df):
     worksheet = sh.worksheet(sheet_name)
-    worksheet.clear() # 싹 지우고
-    # 다시 씀 (헤더 + 내용)
+    worksheet.clear() # 기존 내용 삭제
+    # DataFrame을 리스트로 변환하여 업데이트 (헤더 + 값)
     worksheet.update([df.columns.values.tolist()] + df.values.tolist())
 
 # --- 목표 관리 ---
@@ -76,18 +83,23 @@ def set_goal(amount):
 # ================= 메인 화면 =================
 st.title("✅ 배달 CEO 장부 (Pro)")
 
-# 사이드바 (목표)
+# 사이드바 (목표 및 요약)
 st.sidebar.header("🏆 목표 현황")
 goal_amount = get_goal()
 
+# 데이터 로드 (매번 최신 데이터를 불러옵니다)
 df_work = load_data(SHEET_WORK)
+df_bank = load_data(SHEET_BANK)
+df_maint = load_data(SHEET_MAINT)
+
 current_profit = 0
 current_count = 0
 
 if not df_work.empty:
     current_month = datetime.now().strftime("%Y-%m")
     df_work['날짜'] = df_work['날짜'].astype(str)
-    # 계산을 위해 숫자 변환
+    
+    # 계산을 위해 숫자 변환 (콤마 제거 등)
     for col in ['순수익', '배달건수']:
         if col in df_work.columns:
             df_work[col] = pd.to_numeric(df_work[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
@@ -96,11 +108,13 @@ if not df_work.empty:
     current_profit = month_data['순수익'].sum()
     current_count = month_data['배달건수'].sum()
 
+# 사이드바 표시
 progress = min(current_profit / goal_amount, 1.0) if goal_amount > 0 else 0
 st.sidebar.progress(progress)
-st.sidebar.write(f"💰 수익: **{int(current_profit):,}원**")
-st.sidebar.write(f"🛵 배달: **{int(current_count)}건**")
-new_goal = st.sidebar.number_input("목표 수정", value=goal_amount, step=100000)
+st.sidebar.write(f"💰 이번 달 수익: **{int(current_profit):,}원**")
+st.sidebar.write(f"🛵 이번 달 배달: **{int(current_count)}건**")
+
+new_goal = st.sidebar.number_input("목표 금액 수정", value=goal_amount, step=100000)
 if st.sidebar.button("목표 저장"):
     set_goal(new_goal)
     st.rerun()
@@ -108,115 +122,154 @@ if st.sidebar.button("목표 저장"):
 # 탭 구성
 tab1, tab2, tab3, tab4 = st.tabs(["📝배달매출", "💰입금관리", "🛠️정비관리", "📊통계"])
 
-# --- [탭 1] 배달 매출 ---
+# ================= [탭 1] 배달 매출 =================
 with tab1:
+    st.header("📝 오늘의 매출 입력")
     # 1. 입력 폼
-    with st.expander("✍️ 새 매출 입력하기 (접기/펴기)", expanded=True):
+    with st.container(border=True):
         with st.form("work_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             date = col1.date_input("날짜", datetime.now())
             count = col2.number_input("건수", min_value=0)
+            
             c1, c2 = st.columns(2)
             coupang = c1.number_input("쿠팡(원)", step=1000)
             baemin = c2.number_input("배민(원)", step=1000)
+            
             c3, c4 = st.columns(2)
             expense = c3.number_input("지출(원)", step=1000)
             distance = c4.text_input("거리(km)")
+            
             memo = st.text_input("메모")
             
-            if st.form_submit_button("💾 저장하기"):
+            submitted = st.form_submit_button("💾 입력 내용 저장하기", type="primary")
+            
+            if submitted:
                 total = coupang + baemin
                 net = total - expense
                 save_new_entry(SHEET_WORK, [date, coupang, baemin, total, expense, net, count, distance, memo])
-                st.success("저장 완료!")
+                st.success("✅ 저장되었습니다!")
                 st.rerun()
 
     st.write("---")
     
-    # 2. [핵심] 엑셀처럼 수정/삭제 가능한 표
-    st.subheader("📋 장부 수정 및 삭제")
-    st.caption("💡 팁: 표의 숫자를 클릭해서 바로 고칠 수 있습니다. 수정 후 **[변경사항 저장]**을 꼭 누르세요!")
+    # 2. 리스트 및 수정/삭제
+    st.subheader("📋 전체 내역 (수정/삭제)")
+    st.caption("💡 **사용법**: 표의 내용을 클릭해 수정하거나, 행 왼쪽을 선택 후 `Delete` 키를 눌러 삭제하세요.")
     
     if not df_work.empty:
-        # num_rows="dynamic"을 넣어서 행 추가/삭제 가능하게 함
+        # 최신 날짜가 위로 오도록 정렬
+        sorted_df = df_work.sort_values(by="날짜", ascending=False)
+        
+        # 데이터 에디터 (수정/삭제 가능 모드)
         edited_df = st.data_editor(
-            df_work.sort_values(by="날짜", ascending=False),
-            num_rows="dynamic",
+            sorted_df,
+            num_rows="dynamic",     # 행 추가/삭제 가능
             use_container_width=True,
-            key="editor_work"
+            key="editor_work",
+            hide_index=True
         )
         
-        # 수정사항 저장 버튼
-        if st.button("🔴 변경사항(수정/삭제) 구글 시트에 저장", type="primary"):
-            with st.spinner("저장 중..."):
-                update_entire_sheet(SHEET_WORK, edited_df)
-            st.success("완벽하게 수정되었습니다!")
-            st.rerun()
+        col_btn1, col_btn2 = st.columns([1, 4])
+        with col_btn1:
+            if st.button("🔴 수정/삭제 반영", help="표에서 수정한 내용을 구글 시트에 저장합니다."):
+                with st.spinner("구글 시트에 반영 중..."):
+                    update_entire_sheet(SHEET_WORK, edited_df)
+                st.success("완벽하게 수정되었습니다!")
+                st.rerun()
     else:
-        st.info("데이터가 없습니다.")
+        st.info("아직 저장된 매출 데이터가 없습니다.")
 
-# --- [탭 2] 입금 관리 ---
+# ================= [탭 2] 입금 관리 =================
 with tab2:
-    with st.expander("✍️ 새 입금 입력하기", expanded=True):
+    st.header("💰 입금 내역 입력")
+    with st.container(border=True):
         with st.form("bank_form", clear_on_submit=True):
-            d = st.date_input("입금일", datetime.now())
-            s = st.radio("입금처", ["쿠팡", "배민"], horizontal=True)
-            a = st.number_input("금액", step=10000)
+            col1, col2 = st.columns(2)
+            d = col1.date_input("입금일", datetime.now())
+            s = col2.selectbox("입금처", ["쿠팡", "배민", "기타"]) # 라디오 대신 셀렉트박스로 변경하여 공간 절약
+            a = st.number_input("입금액", step=10000)
             m = st.text_input("메모")
-            if st.form_submit_button("💾 입금 저장"):
+            
+            if st.form_submit_button("💾 입금 저장", type="primary"):
                 save_new_entry(SHEET_BANK, [d, s, a, m])
+                st.success("✅ 입금 내역 저장 완료!")
                 st.rerun()
 
-    st.subheader("📋 입금 내역 수정")
-    df_bank = load_data(SHEET_BANK)
+    st.write("---")
+
+    st.subheader("📋 입금 전체 내역 (수정/삭제)")
+    st.caption("💡 **사용법**: 표를 직접 수정하거나 행을 삭제한 뒤 아래 버튼을 누르세요.")
+
     if not df_bank.empty:
-        # 수정 가능한 표
+        sorted_bank = df_bank.sort_values(by="입금날짜", ascending=False)
         edited_bank = st.data_editor(
-            df_bank.sort_values(by="입금날짜", ascending=False),
+            sorted_bank,
             num_rows="dynamic",
             use_container_width=True,
-            key="editor_bank"
+            key="editor_bank",
+            hide_index=True
         )
-        if st.button("🔴 입금 변경사항 저장"):
+        
+        if st.button("🔴 입금 수정/삭제 반영"):
             update_entire_sheet(SHEET_BANK, edited_bank)
             st.success("저장 완료!")
             st.rerun()
+    else:
+        st.info("입금 내역이 없습니다.")
 
-# --- [탭 3] 정비 관리 ---
+# ================= [탭 3] 정비 관리 =================
 with tab3:
-    with st.expander("✍️ 새 정비 입력하기", expanded=True):
+    st.header("🛠️ 오토바이 정비 입력")
+    with st.container(border=True):
         with st.form("maint_form", clear_on_submit=True):
-            d = st.date_input("날짜", datetime.now())
-            i = st.selectbox("항목", ["휘발유", "오일교환", "타이어", "기타"])
-            c = st.number_input("비용", step=1000)
-            k = st.text_input("Km")
-            m = st.text_input("내용")
-            if st.form_submit_button("💾 정비 저장"):
+            col1, col2 = st.columns(2)
+            d = col1.date_input("날짜", datetime.now())
+            i = col2.selectbox("항목", ["휘발유", "오일교환", "타이어", "브레이크", "기타"])
+            
+            c = st.number_input("비용(원)", step=1000)
+            k = st.text_input("현재 주행거리(Km)")
+            m = st.text_input("정비 내용/메모")
+            
+            if st.form_submit_button("💾 정비 기록 저장", type="primary"):
                 save_new_entry(SHEET_MAINT, [d, i, c, k, m])
+                st.success("✅ 정비 기록 저장 완료!")
                 st.rerun()
 
-    st.subheader("📋 정비 내역 수정")
-    df_maint = load_data(SHEET_MAINT)
+    st.write("---")
+
+    st.subheader("📋 정비 전체 내역 (수정/삭제)")
+    
     if not df_maint.empty:
-        # 수정 가능한 표
+        sorted_maint = df_maint.sort_values(by="날짜", ascending=False)
         edited_maint = st.data_editor(
-            df_maint.sort_values(by="날짜", ascending=False),
+            sorted_maint,
             num_rows="dynamic",
             use_container_width=True,
-            key="editor_maint"
+            key="editor_maint",
+            hide_index=True
         )
-        if st.button("🔴 정비 변경사항 저장"):
+        
+        if st.button("🔴 정비 수정/삭제 반영"):
             update_entire_sheet(SHEET_MAINT, edited_maint)
             st.success("저장 완료!")
             st.rerun()
+    else:
+        st.info("정비 기록이 없습니다.")
 
-# --- [탭 4] 통계 ---
+# ================= [탭 4] 통계 =================
 with tab4:
     st.subheader("📊 매출 분석")
     if not df_work.empty:
         c1, c2 = st.columns(2)
-        c1.metric("이번 달 수익", f"{int(current_profit):,}원")
-        c2.metric("이번 달 배달", f"{int(current_count)}건")
-        st.bar_chart(df_work.set_index('날짜')['순수익'].tail(7))
+        c1.metric("이번 달 총 순수익", f"{int(current_profit):,}원")
+        c2.metric("이번 달 총 배달", f"{int(current_count)}건")
+        
+        st.write("### 📅 최근 7일 수익 변화")
+        # 날짜별로 그룹화하여 그래프가 예쁘게 나오도록 처리
+        chart_data = df_work.copy()
+        chart_data['날짜'] = pd.to_datetime(chart_data['날짜'])
+        daily_profit = chart_data.groupby('날짜')['순수익'].sum().tail(7)
+        st.bar_chart(daily_profit)
     else:
-        st.info("데이터가 없습니다.")
+        st.info("데이터가 충분하지 않습니다.")
