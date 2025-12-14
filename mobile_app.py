@@ -10,7 +10,7 @@ st.set_page_config(page_title="매출관리시스템", page_icon="💰")
 # 주의: Streamlit Secrets에 [gcp_service_account] 정보가 있어야 함
 try:
     gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-    sh = gc.open("매출장부_DB") # 엑셀 파일 이름이 정확해야 함!
+    sh = gc.open_by_url("https://docs.google.com/spreadsheets/d/1vNdErX9sW6N5ulvfr-ndcrGmutxwiuvfe2og87AOEnI/edit?gid=0#gid=0")
 except Exception as e:
     st.error(f"구글 시트 연결 실패! Secrets 설정을 확인하세요.\n에러내용: {e}")
     st.stop()
@@ -211,3 +211,4 @@ with tab4:
         st.bar_chart(chart_data)
     else:
         st.info("데이터가 없습니다.")
+
