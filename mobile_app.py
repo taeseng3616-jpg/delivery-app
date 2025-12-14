@@ -25,23 +25,33 @@ SHEET_BANK = "입금기록"
 SHEET_MAINT = "정비기록"
 SHEET_GOAL = "목표설정"
 
-# --- 데이터 로드 함수 ---
+# --- 데이터 로드 함수 (수정됨: 더 강력한 불러오기 방식) ---
 def load_data(sheet_name):
     try:
         worksheet = sh.worksheet(sheet_name)
-        data = worksheet.get_all_records()
-        df = pd.DataFrame(data)
+        # 기존 get_all_records() 대신 get_all_values() 사용
+        # 이유: get_all_records는 헤더나 데이터 형식이 조금만 이상해도 에러가 나거나 빈 값을 줍니다.
+        rows = worksheet.get_all_values()
         
-        # 데이터가 없을 때 빈 DataFrame 생성 (헤더 포함)
-        if df.empty:
+        # 데이터가 없거나 헤더만 있는 경우 (행 개수가 2개 미만)
+        if len(rows) < 2:
             if sheet_name == SHEET_WORK:
                 return pd.DataFrame(columns=["날짜", "쿠팡수입", "배민수입", "총수입", "지출", "순수익", "배달건수", "주행거리", "메모"])
             elif sheet_name == SHEET_BANK:
                 return pd.DataFrame(columns=["입금날짜", "입금처", "입금액", "메모"])
             elif sheet_name == SHEET_MAINT:
                 return pd.DataFrame(columns=["날짜", "항목", "금액", "당시주행거리", "메모"])
+            return pd.DataFrame()
+        
+        # 첫 번째 줄은 헤더(제목), 두 번째 줄부터 데이터로 분리
+        header = rows[0]
+        data = rows[1:]
+        
+        # 데이터프레임 생성
+        df = pd.DataFrame(data, columns=header)
         return df
-    except:
+    except Exception as e:
+        # 혹시 에러가 나면 빈 표를 반환
         return pd.DataFrame()
 
 # --- 데이터 추가 (한 줄 저장) ---
@@ -273,3 +283,4 @@ with tab4:
         st.bar_chart(daily_profit)
     else:
         st.info("데이터가 충분하지 않습니다.")
+
