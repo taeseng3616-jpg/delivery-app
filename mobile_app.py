@@ -25,23 +25,50 @@ SHEET_BANK = "입금기록"
 SHEET_MAINT = "정비기록"
 SHEET_GOAL = "목표설정"
 
-# --- 데이터 로드 함수 (수정됨: 더 강력한 불러오기 방식) ---
+# --- 데이터 로드 함수 (수정됨: 에러 방지용 강력 모드) ---
 def load_data(sheet_name):
     try:
         worksheet = sh.worksheet(sheet_name)
-        # 기존 get_all_records() 대신 get_all_values() 사용
-        # 이유: get_all_records는 헤더나 데이터 형식이 조금만 이상해도 에러가 나거나 빈 값을 줍니다.
         rows = worksheet.get_all_values()
-        
-        # 데이터가 없거나 헤더만 있는 경우 (행 개수가 2개 미만)
+
+        # 1. 각 시트별로 우리가 원하는 '정확한' 제목(헤더)을 미리 정해둡니다.
+        if sheet_name == SHEET_WORK:
+            required_cols = ["날짜", "쿠팡수입", "배민수입", "총수입", "지출", "순수익", "배달건수", "주행거리", "메모"]
+        elif sheet_name == SHEET_BANK:
+            required_cols = ["입금날짜", "입금처", "입금액", "메모"]
+        elif sheet_name == SHEET_MAINT:
+            required_cols = ["날짜", "항목", "금액", "당시주행거리", "메모"]
+        else:
+            required_cols = []
+
+        # 2. 시트에 데이터가 아예 없거나 제목줄만 있는 경우
         if len(rows) < 2:
-            if sheet_name == SHEET_WORK:
-                return pd.DataFrame(columns=["날짜", "쿠팡수입", "배민수입", "총수입", "지출", "순수익", "배달건수", "주행거리", "메모"])
-            elif sheet_name == SHEET_BANK:
-                return pd.DataFrame(columns=["입금날짜", "입금처", "입금액", "메모"])
-            elif sheet_name == SHEET_MAINT:
-                return pd.DataFrame(columns=["날짜", "항목", "금액", "당시주행거리", "메모"])
-            return pd.DataFrame()
+            return pd.DataFrame(columns=required_cols)
+
+        # 3. 데이터 부분만 가져오기 (첫 번째 줄은 제목일 테니 건너뜀)
+        data = rows[1:]
+        
+        # 4. 데이터프레임 만들기
+        df = pd.DataFrame(data)
+
+        # [중요] 시트에서 가져온 데이터 칸 수가 우리가 원하는 칸 수랑 다를 때 에러 안 나게 처리
+        # 데이터 칸이 모자라면? -> 빈 칸 채우기
+        if df.shape[1] < len(required_cols):
+            for i in range(len(required_cols) - df.shape[1]):
+                df[len(df.columns)] = "" 
+        
+        # 데이터 칸이 넘치면? -> 필요한 만큼만 자르기
+        df = df.iloc[:, :len(required_cols)]
+
+        # 5. 강제로 우리가 정한 이름 붙이기 (이것 때문에 KeyError가 사라집니다)
+        df.columns = required_cols
+        
+        return df
+
+    except Exception as e:
+        # 뭔가 문제가 생기면 빈 표라도 줘서 앱이 꺼지는 걸 막음
+        st.error(f"데이터 로드 중 오류: {e}")
+        return pd.DataFrame()
         
         # 첫 번째 줄은 헤더(제목), 두 번째 줄부터 데이터로 분리
         header = rows[0]
@@ -283,4 +310,5 @@ with tab4:
         st.bar_chart(daily_profit)
     else:
         st.info("데이터가 충분하지 않습니다.")
+
 
