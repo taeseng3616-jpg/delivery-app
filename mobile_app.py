@@ -2,16 +2,14 @@ import streamlit as st
 import pandas as pd
 import gspread
 from datetime import datetime
+import time
 
 # 1. 페이지 설정
-st.set_page_config(page_title="매출 입력", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="배달 CEO 장부", page_icon="🛵", layout="centered")
 
 # --- 구글 시트 연결 ---
 try:
-    # st.secrets를 사용하거나, json 파일 경로를 직접 입력하세요.
     gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-    
-    # 사장님 시트 주소
     url = "https://docs.google.com/spreadsheets/d/1vNdErX9sW6N5ulvfr-ndcrGmutxwiuvfe2og87AOEnI"
     sh = gc.open_by_url(url)
 except Exception as e:
@@ -24,13 +22,12 @@ SHEET_BANK = "입금기록"
 SHEET_MAINT = "정비기록"
 SHEET_GOAL = "목표설정"
 
-# --- [중요] 데이터 로드 함수 (강력한 오류 방지 버전) ---
+# --- 데이터 로드 함수 ---
 def load_data(sheet_name):
     try:
         worksheet = sh.worksheet(sheet_name)
         rows = worksheet.get_all_values()
 
-        # 1. 각 시트별로 우리가 원하는 '정확한' 제목(헤더) 정의
         if sheet_name == SHEET_WORK:
             required_cols = ["날짜", "쿠팡수입", "배민수입", "총수입", "지출", "순수익", "배달건수", "주행거리", "메모"]
         elif sheet_name == SHEET_BANK:
@@ -40,31 +37,24 @@ def load_data(sheet_name):
         else:
             required_cols = []
 
-        # 2. 데이터가 없거나 제목줄만 있는 경우 빈 표 반환
         if len(rows) < 2:
             return pd.DataFrame(columns=required_cols)
 
-        # 3. 데이터 부분만 가져오기
         data = rows[1:]
         df = pd.DataFrame(data)
 
-        # 4. 칸 수가 안 맞을 때 에러 방지 (빈 칸 채우기 또는 자르기)
         if df.shape[1] < len(required_cols):
             for i in range(len(required_cols) - df.shape[1]):
                 df[len(df.columns)] = "" 
         df = df.iloc[:, :len(required_cols)]
-
-        # 5. 헤더 강제 적용
         df.columns = required_cols
-        
         return df
     except Exception as e:
         return pd.DataFrame()
 
-# --- 데이터 추가 (한 줄 저장) ---
+# --- 데이터 추가 ---
 def save_new_entry(sheet_name, data_list):
     worksheet = sh.worksheet(sheet_name)
-    # 시트가 비어있다면 헤더 추가
     if not worksheet.get_all_values():
         if sheet_name == SHEET_WORK:
             worksheet.append_row(["날짜", "쿠팡수입", "배민수입", "총수입", "지출", "순수익", "배달건수", "주행거리", "메모"])
@@ -72,11 +62,9 @@ def save_new_entry(sheet_name, data_list):
             worksheet.append_row(["입금날짜", "입금처", "입금액", "메모"])
         elif sheet_name == SHEET_MAINT:
             worksheet.append_row(["날짜", "항목", "금액", "당시주행거리", "메모"])
-    
-    # 데이터 추가
     worksheet.append_row([str(x) for x in data_list])
 
-# --- 통째로 업데이트 (수정 반영용) ---
+# --- 업데이트 ---
 def update_entire_sheet(sheet_name, df):
     worksheet = sh.worksheet(sheet_name)
     worksheet.clear()
@@ -96,7 +84,7 @@ def set_goal(amount):
         worksheet.update('A1', str(amount))
     except: pass
 
-# --- [핵심] 숫자 변환 도우미 함수 ---
+# --- 숫자 변환 도우미 ---
 def safe_numeric(series):
     return pd.to_numeric(series.astype(str).str.replace(',', ''), errors='coerce').fillna(0)
 
@@ -156,7 +144,8 @@ with tab1:
     with st.container(border=True):
         with st.form("work_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
-            date = col1.date_input("날짜", datetime.now())
+            # format="YYYY-MM-DD" 추가하여 한국식 날짜 표시
+            date = col1.date_input("날짜", datetime.now(), format="YYYY-MM-DD")
             count = col2.number_input("건수", min_value=0)
             
             c1, c2 = st.columns(2)
@@ -173,6 +162,7 @@ with tab1:
                 net = total - expense
                 save_new_entry(SHEET_WORK, [date, coupang, baemin, total, expense, net, count, distance, memo])
                 st.success("✅ 저장되었습니다!")
+                time.sleep(0.5)
                 st.rerun()
 
     st.write("---")
@@ -201,7 +191,8 @@ with tab2:
     with st.container(border=True):
         with st.form("bank_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
-            d = col1.date_input("입금일", datetime.now())
+            # format="YYYY-MM-DD" 추가
+            d = col1.date_input("입금일", datetime.now(), format="YYYY-MM-DD")
             s = col2.selectbox("입금처", ["쿠팡", "배민", "기타"])
             a = st.number_input("입금액", step=10000)
             m = st.text_input("메모")
@@ -209,6 +200,7 @@ with tab2:
             if st.form_submit_button("💾 입금 저장", type="primary"):
                 save_new_entry(SHEET_BANK, [d, s, a, m])
                 st.success("✅ 입금 내역 저장 완료!")
+                time.sleep(0.5)
                 st.rerun()
 
     st.write("---")
@@ -231,11 +223,10 @@ with tab2:
     else:
         st.info("입금 내역이 없습니다.")
 
-# ================= [탭 3] 정비 관리 (수정됨: 직접 입력 기능 추가) =================
+# ================= [탭 3] 정비 관리 =================
 with tab3:
     st.header("🛠️ 오토바이 정비 입력")
     
-    # 1. 항목 리스트 정의 (요청하신 항목 반영)
     maint_items = [
         "휘발유", "오일교환", "미션오일", "브레이크(앞)", "브레이크(뒤)", 
         "에어필터", "구동벨트", "웨이트롤러", "배터리", "점화플러그", 
@@ -244,16 +235,12 @@ with tab3:
     ]
 
     with st.container(border=True):
-        # *주의*: '직접 입력' 기능을 위해 여기서는 st.form을 쓰지 않고 바로 입력받습니다.
-        # (form을 쓰면 '직접 입력' 선택 시 입력창이 바로 안 뜨기 때문입니다)
-        
         col1, col2 = st.columns(2)
-        d = col1.date_input("날짜", datetime.now())
+        # format="YYYY-MM-DD" 추가
+        d = col1.date_input("날짜", datetime.now(), format="YYYY-MM-DD")
         
-        # '직접 입력' 옵션 추가
         selected_item = col2.selectbox("정비 항목", maint_items + ["직접 입력"])
         
-        # '직접 입력' 선택 시에만 텍스트 입력창 보여주기
         if selected_item == "직접 입력":
             final_item = st.text_input("✏️ 항목 이름을 직접 입력하세요")
         else:
@@ -263,15 +250,12 @@ with tab3:
         k = st.text_input("현재 주행거리(Km)")
         m = st.text_input("정비 내용/메모")
         
-        # 저장 버튼 (form이 없으므로 누르면 바로 실행됨)
         if st.button("💾 정비 기록 저장", type="primary"):
             if not final_item:
                 st.warning("⚠️ 항목을 입력해주세요!")
             else:
                 save_new_entry(SHEET_MAINT, [d, final_item, c, k, m])
                 st.success(f"✅ [{final_item}] 정비 기록 저장 완료!")
-                # 잠시 후 새로고침
-                import time
                 time.sleep(1)
                 st.rerun()
 
@@ -304,15 +288,19 @@ with tab4:
         c2.metric("이번 달 총 배달", f"{int(current_count)}건")
         
         st.write("### 📅 최근 7일 수익 변화")
+        
+        # 차트 데이터를 한글 날짜 포맷으로 변환
         chart_data = df_work.copy()
         chart_data['날짜'] = pd.to_datetime(chart_data['날짜'], errors='coerce')
         chart_data = chart_data.dropna(subset=['날짜'])
         
         if not chart_data.empty:
-            daily_profit = chart_data.groupby('날짜')['순수익'].sum().tail(7)
+            # 날짜를 '12월 14일' 형태로 변환하여 그래프 X축에 한글이 나오도록 함
+            chart_data['날짜_str'] = chart_data['날짜'].dt.strftime('%m월 %d일')
+            daily_profit = chart_data.groupby('날짜_str')['순수익'].sum().tail(7)
+            
             st.bar_chart(daily_profit)
         else:
             st.info("날짜 데이터가 올바르지 않습니다.")
     else:
         st.info("데이터가 충분하지 않습니다.")
-
