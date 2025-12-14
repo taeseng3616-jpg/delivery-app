@@ -9,7 +9,6 @@ st.set_page_config(page_title="배달 CEO 장부", page_icon="🛵", layout="cen
 # --- 구글 시트 연결 ---
 try:
     # st.secrets를 사용하거나, json 파일 경로를 직접 입력하세요.
-    # 로컬 테스트 시에는 json 파일 경로를 사용하시는 것이 편할 수 있습니다.
     gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
     
     # 사장님 시트 주소
@@ -25,13 +24,13 @@ SHEET_BANK = "입금기록"
 SHEET_MAINT = "정비기록"
 SHEET_GOAL = "목표설정"
 
-# --- 데이터 로드 함수 (수정됨: 에러 방지용 강력 모드) ---
+# --- [중요] 데이터 로드 함수 (강력한 오류 방지 버전) ---
 def load_data(sheet_name):
     try:
         worksheet = sh.worksheet(sheet_name)
         rows = worksheet.get_all_values()
 
-        # 1. 각 시트별로 우리가 원하는 '정확한' 제목(헤더)을 미리 정해둡니다.
+        # 1. 각 시트별로 우리가 원하는 '정확한' 제목(헤더) 정의
         if sheet_name == SHEET_WORK:
             required_cols = ["날짜", "쿠팡수입", "배민수입", "총수입", "지출", "순수익", "배달건수", "주행거리", "메모"]
         elif sheet_name == SHEET_BANK:
@@ -41,33 +40,25 @@ def load_data(sheet_name):
         else:
             required_cols = []
 
-        # 2. 시트에 데이터가 아예 없거나 제목줄만 있는 경우
+        # 2. 데이터가 없거나 제목줄만 있는 경우 빈 표 반환
         if len(rows) < 2:
             return pd.DataFrame(columns=required_cols)
 
-        # 3. 데이터 부분만 가져오기 (첫 번째 줄은 제목일 테니 건너뜀)
+        # 3. 데이터 부분만 가져오기
         data = rows[1:]
-        
-        # 4. 데이터프레임 만들기
         df = pd.DataFrame(data)
 
-        # [중요] 시트에서 가져온 데이터 칸 수가 우리가 원하는 칸 수랑 다를 때 에러 안 나게 처리
-        # 데이터 칸이 모자라면? -> 빈 칸 채우기
+        # 4. 칸 수가 안 맞을 때 에러 방지 (빈 칸 채우기 또는 자르기)
         if df.shape[1] < len(required_cols):
             for i in range(len(required_cols) - df.shape[1]):
                 df[len(df.columns)] = "" 
-        
-        # 데이터 칸이 넘치면? -> 필요한 만큼만 자르기
         df = df.iloc[:, :len(required_cols)]
 
-        # 5. 강제로 우리가 정한 이름 붙이기 (이것 때문에 KeyError가 사라집니다)
+        # 5. 헤더 강제 적용
         df.columns = required_cols
         
         return df
-
     except Exception as e:
-        # 뭔가 문제가 생기면 빈 표라도 줘서 앱이 꺼지는 걸 막음
-        st.error(f"데이터 로드 중 오류: {e}")
         return pd.DataFrame()
 
 # --- 데이터 추가 (한 줄 저장) ---
@@ -85,11 +76,10 @@ def save_new_entry(sheet_name, data_list):
     # 데이터 추가
     worksheet.append_row([str(x) for x in data_list])
 
-# --- [핵심] 통째로 업데이트 (수정/삭제 반영용) ---
+# --- 통째로 업데이트 (수정 반영용) ---
 def update_entire_sheet(sheet_name, df):
     worksheet = sh.worksheet(sheet_name)
-    worksheet.clear() # 기존 내용 삭제
-    # DataFrame을 리스트로 변환하여 업데이트 (헤더 + 값)
+    worksheet.clear()
     worksheet.update([df.columns.values.tolist()] + df.values.tolist())
 
 # --- 목표 관리 ---
@@ -106,35 +96,49 @@ def set_goal(amount):
         worksheet.update('A1', str(amount))
     except: pass
 
+# --- [핵심] 숫자 변환 도우미 함수 ---
+# 콤마(,)가 있는 문자열도 안전하게 숫자로 바꿔줍니다.
+def safe_numeric(series):
+    return pd.to_numeric(series.astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+
 # ================= 메인 화면 =================
 st.title("✅ 배달 CEO 장부 (Pro)")
 
-# 사이드바 (목표 및 요약)
+# 사이드바
 st.sidebar.header("🏆 목표 현황")
 goal_amount = get_goal()
 
-# 데이터 로드 (매번 최신 데이터를 불러옵니다)
+# 1. 데이터 로드
 df_work = load_data(SHEET_WORK)
 df_bank = load_data(SHEET_BANK)
 df_maint = load_data(SHEET_MAINT)
 
+# 2. [중요] 데이터를 숫자로 변환 (이 부분이 추가되어야 오류가 안 납니다)
+if not df_work.empty:
+    for col in ['쿠팡수입', '배민수입', '총수입', '지출', '순수익', '배달건수']:
+        if col in df_work.columns:
+            df_work[col] = safe_numeric(df_work[col])
+
+if not df_bank.empty:
+    for col in ['입금액']:
+        if col in df_bank.columns:
+            df_bank[col] = safe_numeric(df_bank[col])
+
+if not df_maint.empty:
+    for col in ['금액']:
+        if col in df_maint.columns:
+            df_maint[col] = safe_numeric(df_maint[col])
+
+# 3. 요약 계산
 current_profit = 0
 current_count = 0
-
 if not df_work.empty:
     current_month = datetime.now().strftime("%Y-%m")
-    df_work['날짜'] = df_work['날짜'].astype(str)
-    
-    # 계산을 위해 숫자 변환 (콤마 제거 등)
-    for col in ['순수익', '배달건수']:
-        if col in df_work.columns:
-            df_work[col] = pd.to_numeric(df_work[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-    
-    month_data = df_work[df_work['날짜'].str.contains(current_month, na=False)]
+    # 날짜 필터링을 위해 문자열로 처리
+    month_data = df_work[df_work['날짜'].astype(str).str.contains(current_month, na=False)]
     current_profit = month_data['순수익'].sum()
     current_count = month_data['배달건수'].sum()
 
-# 사이드바 표시
 progress = min(current_profit / goal_amount, 1.0) if goal_amount > 0 else 0
 st.sidebar.progress(progress)
 st.sidebar.write(f"💰 이번 달 수익: **{int(current_profit):,}원**")
@@ -151,7 +155,6 @@ tab1, tab2, tab3, tab4 = st.tabs(["📝배달매출", "💰입금관리", "🛠�
 # ================= [탭 1] 배달 매출 =================
 with tab1:
     st.header("📝 오늘의 매출 입력")
-    # 1. 입력 폼
     with st.container(border=True):
         with st.form("work_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
@@ -165,12 +168,9 @@ with tab1:
             c3, c4 = st.columns(2)
             expense = c3.number_input("지출(원)", step=1000)
             distance = c4.text_input("거리(km)")
-            
             memo = st.text_input("메모")
             
-            submitted = st.form_submit_button("💾 입력 내용 저장하기", type="primary")
-            
-            if submitted:
+            if st.form_submit_button("💾 입력 내용 저장하기", type="primary"):
                 total = coupang + baemin
                 net = total - expense
                 save_new_entry(SHEET_WORK, [date, coupang, baemin, total, expense, net, count, distance, memo])
@@ -178,31 +178,22 @@ with tab1:
                 st.rerun()
 
     st.write("---")
-    
-    # 2. 리스트 및 수정/삭제
     st.subheader("📋 전체 내역 (수정/삭제)")
-    st.caption("💡 **사용법**: 표의 내용을 클릭해 수정하거나, 행 왼쪽을 선택 후 `Delete` 키를 눌러 삭제하세요.")
     
     if not df_work.empty:
-        # 최신 날짜가 위로 오도록 정렬
         sorted_df = df_work.sort_values(by="날짜", ascending=False)
-        
-        # 데이터 에디터 (수정/삭제 가능 모드)
         edited_df = st.data_editor(
             sorted_df,
-            num_rows="dynamic",     # 행 추가/삭제 가능
+            num_rows="dynamic",
             use_container_width=True,
             key="editor_work",
             hide_index=True
         )
-        
-        col_btn1, col_btn2 = st.columns([1, 4])
-        with col_btn1:
-            if st.button("🔴 수정/삭제 반영", help="표에서 수정한 내용을 구글 시트에 저장합니다."):
-                with st.spinner("구글 시트에 반영 중..."):
-                    update_entire_sheet(SHEET_WORK, edited_df)
-                st.success("완벽하게 수정되었습니다!")
-                st.rerun()
+        if st.button("🔴 매출 수정/삭제 반영"):
+            with st.spinner("저장 중..."):
+                update_entire_sheet(SHEET_WORK, edited_df)
+            st.success("완벽하게 수정되었습니다!")
+            st.rerun()
     else:
         st.info("아직 저장된 매출 데이터가 없습니다.")
 
@@ -213,7 +204,7 @@ with tab2:
         with st.form("bank_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             d = col1.date_input("입금일", datetime.now())
-            s = col2.selectbox("입금처", ["쿠팡", "배민", "기타"]) # 라디오 대신 셀렉트박스로 변경하여 공간 절약
+            s = col2.selectbox("입금처", ["쿠팡", "배민", "기타"])
             a = st.number_input("입금액", step=10000)
             m = st.text_input("메모")
             
@@ -223,11 +214,10 @@ with tab2:
                 st.rerun()
 
     st.write("---")
-
     st.subheader("📋 입금 전체 내역 (수정/삭제)")
-    st.caption("💡 **사용법**: 표를 직접 수정하거나 행을 삭제한 뒤 아래 버튼을 누르세요.")
 
     if not df_bank.empty:
+        # 날짜순 정렬
         sorted_bank = df_bank.sort_values(by="입금날짜", ascending=False)
         edited_bank = st.data_editor(
             sorted_bank,
@@ -252,7 +242,6 @@ with tab3:
             col1, col2 = st.columns(2)
             d = col1.date_input("날짜", datetime.now())
             i = col2.selectbox("항목", ["휘발유", "오일교환", "타이어", "브레이크", "기타"])
-            
             c = st.number_input("비용(원)", step=1000)
             k = st.text_input("현재 주행거리(Km)")
             m = st.text_input("정비 내용/메모")
@@ -263,7 +252,6 @@ with tab3:
                 st.rerun()
 
     st.write("---")
-
     st.subheader("📋 정비 전체 내역 (수정/삭제)")
     
     if not df_maint.empty:
@@ -292,11 +280,16 @@ with tab4:
         c2.metric("이번 달 총 배달", f"{int(current_count)}건")
         
         st.write("### 📅 최근 7일 수익 변화")
-        # 날짜별로 그룹화하여 그래프가 예쁘게 나오도록 처리
         chart_data = df_work.copy()
-        chart_data['날짜'] = pd.to_datetime(chart_data['날짜'])
-        daily_profit = chart_data.groupby('날짜')['순수익'].sum().tail(7)
-        st.bar_chart(daily_profit)
+        # 날짜 형식이 올바른지 확인 후 변환
+        chart_data['날짜'] = pd.to_datetime(chart_data['날짜'], errors='coerce')
+        # 날짜가 변환되지 않은 행 제거
+        chart_data = chart_data.dropna(subset=['날짜'])
+        
+        if not chart_data.empty:
+            daily_profit = chart_data.groupby('날짜')['순수익'].sum().tail(7)
+            st.bar_chart(daily_profit)
+        else:
+            st.info("날짜 데이터가 올바르지 않습니다.")
     else:
         st.info("데이터가 충분하지 않습니다.")
-
