@@ -276,45 +276,83 @@ with tab3:
     else:
         st.info("정비 기록이 없습니다.")
 
-# ================= [탭 4] 통계 (수정됨: 월별 드롭다운 조회 기능) =================
+# ================= [탭 4] 통계 (수정됨: 연간/월별 분석 기능 통합) =================
 with tab4:
-    st.subheader("📊 월별 매출 분석")
-    
     if not df_work.empty:
-        # 1. 데이터 가공 (날짜 인식)
+        # 데이터 전처리
         df_stat = df_work.copy()
         df_stat['날짜'] = pd.to_datetime(df_stat['날짜'], errors='coerce')
         df_stat = df_stat.dropna(subset=['날짜'])
-
-        # 2. 존재하는 '년-월' 목록 추출 (예: ['2025-12', '2025-11'])
-        df_stat['월'] = df_stat['날짜'].dt.strftime('%Y-%m')
-        unique_months = sorted(df_stat['월'].unique().tolist(), reverse=True)
-
-        if unique_months:
-            # 3. 드롭다운 생성 (기본값: 가장 최근 달)
-            selected_month = st.selectbox("📅 조회할 월을 선택하세요", unique_months)
-
-            # 4. 선택한 월의 데이터만 필터링
-            month_data = df_stat[df_stat['월'] == selected_month]
-
-            # 5. 통계 계산
-            stat_profit = month_data['순수익'].sum()
-            stat_count = month_data['배달건수'].sum()
-
-            # 6. 화면 표시
-            c1, c2 = st.columns(2)
-            c1.metric(f"{selected_month} 총 순수익", f"{int(stat_profit):,}원")
-            c2.metric(f"{selected_month} 총 배달", f"{int(stat_count)}건")
-
-            st.write("---")
-            st.write(f"### 📈 {selected_month} 일별 수익 그래프")
-
-            # 그래프 그리기 (X축을 일(Day)로 표시)
-            month_data['일'] = month_data['날짜'].dt.strftime('%d일')
-            # 같은 날짜에 여러 건이 있을 수 있으므로 날짜별 합계 계산
-            daily_chart = month_data.groupby('일')['순수익'].sum()
+        
+        if not df_stat.empty:
+            # 년도와 월 추출
+            df_stat['년'] = df_stat['날짜'].dt.year
+            df_stat['월'] = df_stat['날짜'].dt.strftime('%Y-%m') # 2025-12 형태
             
-            st.bar_chart(daily_chart)
+            # ----------------------------------------------------------
+            # 1. [연간 매출 분석] - 숲을 보는 기능
+            # ----------------------------------------------------------
+            st.subheader("📅 연간 매출 분석 (Yearly)")
+            
+            # 년도 목록 추출 (2025, 2024...)
+            unique_years = sorted(df_stat['년'].unique(), reverse=True)
+            selected_year = st.selectbox("조회할 년도를 선택하세요", unique_years)
+            
+            # 선택한 년도 데이터 필터링
+            year_data = df_stat[df_stat['년'] == selected_year]
+            
+            if not year_data.empty:
+                # 1년 총 수익 및 배달 건수
+                total_profit_year = year_data['순수익'].sum()
+                total_count_year = year_data['배달건수'].sum()
+                
+                c1, c2 = st.columns(2)
+                c1.metric(f"{selected_year}년 총 순수익", f"{int(total_profit_year):,}원")
+                c2.metric(f"{selected_year}년 총 배달", f"{int(total_count_year):,}건")
+                
+                # 월별 그래프 그리기
+                # 1월~12월 순서대로 정렬하기 위해 '월_숫자' 컬럼 생성
+                year_data['월_숫자'] = year_data['날짜'].dt.month
+                monthly_chart = year_data.groupby('월_숫자')['순수익'].sum()
+                
+                # 차트 표시 (X축 라벨을 1월, 2월... 로 표시하면 더 예쁨)
+                st.bar_chart(monthly_chart)
+                st.caption(f"👆 {selected_year}년의 월별 수익 흐름입니다.")
+            else:
+                st.info("선택한 년도의 데이터가 없습니다.")
+
+            st.write("---") # 구분선
+
+            # ----------------------------------------------------------
+            # 2. [월별 상세 분석] - 나무를 보는 기능
+            # ----------------------------------------------------------
+            st.subheader("📊 월별 상세 분석 (Monthly)")
+            
+            # 월 목록 추출 (2025-12, 2025-11...)
+            unique_months = sorted(df_stat['월'].unique().tolist(), reverse=True)
+            
+            if unique_months:
+                selected_month = st.selectbox("조회할 월을 선택하세요", unique_months)
+
+                # 선택한 월 데이터 필터링
+                month_data = df_stat[df_stat['월'] == selected_month]
+
+                # 해당 월 통계
+                stat_profit = month_data['순수익'].sum()
+                stat_count = month_data['배달건수'].sum()
+
+                m1, m2 = st.columns(2)
+                m1.metric(f"{selected_month} 총 순수익", f"{int(stat_profit):,}원")
+                m2.metric(f"{selected_month} 총 배달", f"{int(stat_count)}건")
+
+                st.write(f"###### 📈 {selected_month} 일별 수익 변화")
+
+                # 일별 그래프
+                month_data['일'] = month_data['날짜'].dt.strftime('%d일')
+                daily_chart = month_data.groupby('일')['순수익'].sum()
+                st.bar_chart(daily_chart)
+            else:
+                st.info("월별 데이터가 없습니다.")
         else:
              st.info("통계에 사용할 날짜 데이터가 충분하지 않습니다.")
     else:
