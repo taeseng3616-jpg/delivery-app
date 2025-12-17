@@ -276,7 +276,7 @@ with tab3:
     else:
         st.info("정비 기록이 없습니다.")
 
-# ================= [탭 4] 통계 (수정됨: 연간/월별 분석 기능 통합) =================
+# ================= [탭 4] 통계 (수정됨: 월별 위, 연간 아래) =================
 with tab4:
     if not df_work.empty:
         # 데이터 전처리
@@ -285,50 +285,14 @@ with tab4:
         df_stat = df_stat.dropna(subset=['날짜'])
         
         if not df_stat.empty:
-            # 년도와 월 추출
             df_stat['년'] = df_stat['날짜'].dt.year
             df_stat['월'] = df_stat['날짜'].dt.strftime('%Y-%m') # 2025-12 형태
             
             # ----------------------------------------------------------
-            # 1. [연간 매출 분석] - 숲을 보는 기능
-            # ----------------------------------------------------------
-            st.subheader("📅 연간 매출 분석 (Yearly)")
-            
-            # 년도 목록 추출 (2025, 2024...)
-            unique_years = sorted(df_stat['년'].unique(), reverse=True)
-            selected_year = st.selectbox("조회할 년도를 선택하세요", unique_years)
-            
-            # 선택한 년도 데이터 필터링
-            year_data = df_stat[df_stat['년'] == selected_year]
-            
-            if not year_data.empty:
-                # 1년 총 수익 및 배달 건수
-                total_profit_year = year_data['순수익'].sum()
-                total_count_year = year_data['배달건수'].sum()
-                
-                c1, c2 = st.columns(2)
-                c1.metric(f"{selected_year}년 총 순수익", f"{int(total_profit_year):,}원")
-                c2.metric(f"{selected_year}년 총 배달", f"{int(total_count_year):,}건")
-                
-                # 월별 그래프 그리기
-                # 1월~12월 순서대로 정렬하기 위해 '월_숫자' 컬럼 생성
-                year_data['월_숫자'] = year_data['날짜'].dt.month
-                monthly_chart = year_data.groupby('월_숫자')['순수익'].sum()
-                
-                # 차트 표시 (X축 라벨을 1월, 2월... 로 표시하면 더 예쁨)
-                st.bar_chart(monthly_chart)
-                st.caption(f"👆 {selected_year}년의 월별 수익 흐름입니다.")
-            else:
-                st.info("선택한 년도의 데이터가 없습니다.")
-
-            st.write("---") # 구분선
-
-            # ----------------------------------------------------------
-            # 2. [월별 상세 분석] - 나무를 보는 기능
+            # 1. [월별 상세 분석] (사용자 요청: 상단 배치)
             # ----------------------------------------------------------
             st.subheader("📊 월별 상세 분석 (Monthly)")
             
-            # 월 목록 추출 (2025-12, 2025-11...)
             unique_months = sorted(df_stat['월'].unique().tolist(), reverse=True)
             
             if unique_months:
@@ -353,6 +317,40 @@ with tab4:
                 st.bar_chart(daily_chart)
             else:
                 st.info("월별 데이터가 없습니다.")
+
+            st.write("---") # 구분선
+
+            # ----------------------------------------------------------
+            # 2. [연간 매출 분석] (사용자 요청: 하단 배치)
+            # ----------------------------------------------------------
+            st.subheader("📅 연간 매출 분석 (Yearly)")
+            
+            unique_years = sorted(df_stat['년'].unique(), reverse=True)
+            if unique_years:
+                selected_year = st.selectbox("조회할 년도를 선택하세요", unique_years)
+                
+                # 선택한 년도 데이터 필터링
+                year_data = df_stat[df_stat['년'] == selected_year]
+                
+                if not year_data.empty:
+                    total_profit_year = year_data['순수익'].sum()
+                    total_count_year = year_data['배달건수'].sum()
+                    
+                    c1, c2 = st.columns(2)
+                    c1.metric(f"{selected_year}년 총 순수익", f"{int(total_profit_year):,}원")
+                    c2.metric(f"{selected_year}년 총 배달", f"{int(total_count_year):,}건")
+                    
+                    # 월별 그래프 그리기
+                    year_data['월_숫자'] = year_data['날짜'].dt.month
+                    monthly_chart = year_data.groupby('월_숫자')['순수익'].sum()
+                    
+                    st.bar_chart(monthly_chart)
+                    st.caption(f"👆 {selected_year}년의 월별 수익 흐름입니다.")
+                else:
+                    st.info("선택한 년도의 데이터가 없습니다.")
+            else:
+                st.info("연도별 데이터가 없습니다.")
+
         else:
              st.info("통계에 사용할 날짜 데이터가 충분하지 않습니다.")
     else:
