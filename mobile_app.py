@@ -28,29 +28,23 @@ SHEET_GOAL = "목표설정"
 def login_screen():
     st.title("🛵 배달 CEO 장부 (공용)")
     
-    # 1. URL에서 아이디 가져오기 (즐겨찾기용)
-    # Streamlit 최신 버전에 맞춰 query_params 사용
     query_params = st.query_params
     default_id = query_params.get("id", "")
 
     st.write("본인의 아이디와 비밀번호를 사용하여 로그인하세요.")
     
     with st.form("login_form"):
-        # value에 URL에서 가져온 아이디를 넣어줌
         user_id = st.text_input("아이디 (닉네임)", value=default_id, placeholder="예: 라이더1")
-        # autocomplete="current-password"는 브라우저에게 "이거 비번이니까 저장해!"라고 알려주는 힌트
         password = st.text_input("비밀번호", type="password", placeholder="비밀번호")
         
         submit = st.form_submit_button("로그인 / 시작하기", type="primary")
         
         if submit:
             if user_id and password:
-                # 로그인 성공 처리
                 st.session_state['logged_in'] = True
                 st.session_state['user_id'] = user_id
                 st.session_state['password'] = password
                 
-                # [핵심] 로그인 성공 시 URL에 아이디 박아넣기
                 st.query_params["id"] = user_id
                 
                 st.success(f"반갑습니다, {user_id}님!")
@@ -60,10 +54,8 @@ def login_screen():
             else:
                 st.warning("아이디와 비밀번호를 모두 입력해주세요.")
     
-    # 팁 문구 추가
     st.info("💡 **팁:** 로그인 후 브라우저(삼성인터넷/크롬)에서 **'비밀번호 저장'**을 누르시면 다음부터 자동으로 입력됩니다.")
 
-# 로그인이 안 되어 있으면 로그인 화면만 보여주고 중단
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 
@@ -71,12 +63,11 @@ if not st.session_state['logged_in']:
     login_screen()
     st.stop()
 
-# 로그인 된 사용자 ID
 CURRENT_USER = st.session_state['user_id']
 CURRENT_PW = st.session_state['password']
 
 
-# --- 데이터 로드 함수 (수정됨: 사용자 ID 필터링) ---
+# --- 데이터 로드 함수 (사용자 ID 필터링) ---
 def load_data(sheet_name):
     try:
         worksheet = sh.worksheet(sheet_name)
@@ -103,14 +94,14 @@ def load_data(sheet_name):
         df = df.iloc[:, :len(required_cols)]
         df.columns = required_cols
         
-        # [핵심] 현재 로그인한 사용자의 데이터만 필터링
+        # 내 데이터만 필터링
         my_data = df[(df['아이디'] == CURRENT_USER) & (df['비번'] == CURRENT_PW)]
         
         return my_data
     except Exception as e:
         return pd.DataFrame()
 
-# --- 데이터 추가 (수정됨: 아이디/비번 자동 저장) ---
+# --- 데이터 추가 ---
 def save_new_entry(sheet_name, data_list):
     worksheet = sh.worksheet(sheet_name)
     if not worksheet.get_all_values():
@@ -124,7 +115,7 @@ def save_new_entry(sheet_name, data_list):
     full_data = [CURRENT_USER, CURRENT_PW] + data_list
     worksheet.append_row([str(x) for x in full_data])
 
-# --- 업데이트 (수정됨: 내 데이터만 수정) ---
+# --- 업데이트 (내 데이터만 수정) ---
 def update_my_data(sheet_name, my_edited_df):
     worksheet = sh.worksheet(sheet_name)
     all_rows = worksheet.get_all_values()
@@ -134,10 +125,8 @@ def update_my_data(sheet_name, my_edited_df):
     
     all_df = pd.DataFrame(all_rows[1:], columns=header)
     
-    # 남의 데이터 보존
     others_df = all_df[all_df['아이디'] != CURRENT_USER]
     
-    # 내 데이터 갱신
     my_edited_df['아이디'] = CURRENT_USER
     my_edited_df['비번'] = CURRENT_PW
     
@@ -147,7 +136,7 @@ def update_my_data(sheet_name, my_edited_df):
     worksheet.update([final_df.columns.values.tolist()] + final_df.values.tolist())
 
 
-# --- 목표 관리 (임시 세션 저장) ---
+# --- 목표 관리 ---
 def get_user_goal():
     if 'my_goal' not in st.session_state:
         st.session_state['my_goal'] = 3000000
@@ -168,7 +157,6 @@ with col_title:
 with col_logout:
     if st.button("로그아웃"):
         st.session_state['logged_in'] = False
-        # 로그아웃 시 URL에서 아이디 제거 (보안)
         st.query_params.clear()
         st.rerun()
 
@@ -219,7 +207,7 @@ if st.sidebar.button("목표 설정"):
 # 탭 구성
 tab1, tab2, tab3, tab4 = st.tabs(["📝배달매출", "💰입금관리", "🛠️정비관리", "📊통계"])
 
-# ================= [탭 1] 배달 매출 =================
+# ================= [탭 1] 배달 매출 (월별 조회 적용됨) =================
 with tab1:
     st.header("📝 금일매출")
     with st.container(border=True):
@@ -244,9 +232,10 @@ with tab1:
 
     st.write("---")
     st.subheader("📋 전체 내역 (수정/삭제)")
-    st.caption("💡 다른 사용자의 데이터는 보이지 않습니다.")
+    st.caption("💡 다른 사용자의 데이터는 보이지 않으며, **월별**로 선택하여 볼 수 있습니다.")
     
     if not df_work.empty:
+        # 월별 필터링 준비
         df_view = df_work.copy()
         df_view['날짜_dt'] = pd.to_datetime(df_view['날짜'], errors='coerce')
         df_view['월'] = df_view['날짜_dt'].dt.strftime('%Y-%m')
@@ -258,6 +247,8 @@ with tab1:
             selected_month = col_sel.selectbox("📅 수정할 데이터의 '월(Month)'을 선택하세요", all_months)
             
             current_month_df = df_view[df_view['월'] == selected_month].drop(columns=['날짜_dt', '월'])
+            
+            # 아이디/비번 숨김
             cols_to_hide = ['아이디', '비번']
             current_month_df = current_month_df.drop(columns=[c for c in cols_to_hide if c in current_month_df.columns])
 
@@ -276,7 +267,10 @@ with tab1:
                     df_work['날짜_temp'] = pd.to_datetime(df_work['날짜'], errors='coerce')
                     df_work['월_temp'] = df_work['날짜_temp'].dt.strftime('%Y-%m')
                     
+                    # 수정한 달이 아닌 나머지 데이터 보존
                     my_data_keep = df_work[df_work['월_temp'] != selected_month].drop(columns=['날짜_temp', '월_temp'])
+                    
+                    # 합치기
                     my_final_df = pd.concat([my_data_keep, edited_df], ignore_index=True)
                     
                     update_my_data(SHEET_WORK, my_final_df)
@@ -288,7 +282,7 @@ with tab1:
     else:
         st.info("저장된 매출 데이터가 없습니다.")
 
-# ================= [탭 2] 입금 관리 =================
+# ================= [탭 2] 입금 관리 (월별 조회 적용됨) =================
 with tab2:
     st.header("💰 입금 내역 입력")
     with st.container(border=True):
@@ -307,6 +301,7 @@ with tab2:
 
     st.write("---")
     st.subheader("📋 입금 전체 내역 (수정/삭제)")
+    st.caption("💡 입금 내역도 **월별**로 조회하고 수정할 수 있습니다.")
 
     if not df_bank.empty:
         df_bank_view = df_bank.copy()
@@ -351,7 +346,7 @@ with tab2:
     else:
         st.info("입금 내역이 없습니다.")
 
-# ================= [탭 3] 정비 관리 =================
+# ================= [탭 3] 정비 관리 (수정됨: 월별 조회 추가!) =================
 with tab3:
     st.header("🛠️ 오토바이 정비 입력")
     
@@ -397,24 +392,55 @@ with tab3:
         st.info("기록이 없습니다.")
 
     st.write("---")
-    with st.expander("📋 정비 전체 기록 수정/삭제"):
+    
+    # [수정된 부분] 정비 내역도 월별로 볼 수 있게 수정함!
+    with st.expander("📋 정비 전체 기록 수정/삭제 (클릭)", expanded=True):
         if not df_maint.empty:
-            cols_to_hide = ['아이디', '비번']
-            df_maint_view = df_maint.drop(columns=[c for c in cols_to_hide if c in df_maint.columns])
+            # 월별 필터링 준비
+            df_maint_view = df_maint.copy()
+            df_maint_view['날짜_dt'] = pd.to_datetime(df_maint_view['날짜'], errors='coerce')
+            df_maint_view['월'] = df_maint_view['날짜_dt'].dt.strftime('%Y-%m')
+
+            all_months_maint = sorted(df_maint_view['월'].dropna().unique().tolist(), reverse=True)
             
-            sorted_maint = df_maint_view.sort_values(by="날짜", ascending=False)
-            edited_maint = st.data_editor(
-                sorted_maint,
-                num_rows="dynamic",
-                use_container_width=True,
-                key="editor_maint",
-                hide_index=True
-            )
-            
-            if st.button("🔴 정비 수정/삭제 반영"):
-                update_my_data(SHEET_MAINT, edited_maint)
-                st.success("저장 완료!")
-                st.rerun()
+            if all_months_maint:
+                col_sel_m, _ = st.columns([1, 2])
+                selected_month_maint = col_sel_m.selectbox("📅 정비 내역 '월(Month)' 선택", all_months_maint, key="maint_month_select")
+                
+                # 선택한 달만 필터링
+                current_month_maint_df = df_maint_view[df_maint_view['월'] == selected_month_maint].drop(columns=['날짜_dt', '월'])
+                
+                # 아이디/비번 숨기기
+                cols_to_hide = ['아이디', '비번']
+                current_month_maint_df = current_month_maint_df.drop(columns=[c for c in cols_to_hide if c in current_month_maint_df.columns])
+                
+                sorted_maint = current_month_maint_df.sort_values(by="날짜", ascending=False)
+                
+                edited_maint = st.data_editor(
+                    sorted_maint,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    key="editor_maint",
+                    hide_index=True
+                )
+                
+                if st.button("🔴 정비 수정/삭제 반영"):
+                    with st.spinner("저장 중..."):
+                        df_maint['날짜_temp'] = pd.to_datetime(df_maint['날짜'], errors='coerce')
+                        df_maint['월_temp'] = df_maint['날짜_temp'].dt.strftime('%Y-%m')
+                        
+                        # 수정 안 한 달 보존
+                        my_data_keep = df_maint[df_maint['월_temp'] != selected_month_maint].drop(columns=['날짜_temp', '월_temp'])
+                        
+                        # 합치기
+                        my_final_df = pd.concat([my_data_keep, edited_maint], ignore_index=True)
+                        
+                        update_my_data(SHEET_MAINT, my_final_df)
+                        
+                    st.success("저장 완료!")
+                    st.rerun()
+            else:
+                 st.info("표시할 날짜 데이터가 없습니다.")
         else:
             st.info("기록이 없습니다.")
 
