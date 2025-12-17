@@ -29,7 +29,6 @@ if 'form_id' not in st.session_state:
     st.session_state['form_id'] = 0
 
 def reset_forms():
-    # 이 숫자가 바뀌면 모든 입력창이 새로고침되면서 비워집니다.
     st.session_state['form_id'] += 1
 
 # ==========================================
@@ -144,7 +143,6 @@ def update_my_data(sheet_name, my_edited_df):
 
 # --- 엑셀 다운로드 도우미 ---
 def convert_df_to_csv(df):
-    # 한글 깨짐 방지를 위해 utf-8-sig 사용
     return df.to_csv(index=False).encode('utf-8-sig')
 
 
@@ -223,10 +221,8 @@ tab1, tab2, tab3, tab4 = st.tabs(["📝배달매출", "💰입금관리", "🛠�
 with tab1:
     st.header("📝 금일매출")
     with st.container(border=True):
-        # [핵심] clear_on_submit=True 설정 + form_id를 통한 강제 리셋
         with st.form("work_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
-            # key에 form_id를 붙여서 강제로 새로운 위젯인 척 인식시킴 (확실한 초기화)
             date = col1.date_input("날짜", datetime.now(), format="YYYY-MM-DD", key=f"w_date_{st.session_state.form_id}")
             platform = col2.selectbox("플랫폼", ["쿠팡", "배민", "일반대행", "기타"], key=f"w_plat_{st.session_state.form_id}")
             
@@ -237,12 +233,7 @@ with tab1:
             memo = st.text_input("메모", key=f"w_mem_{st.session_state.form_id}")
             
             if st.form_submit_button("💾 입력 내용 저장하기", type="primary"):
-                # 플랫폼 자동 결정 로직
                 platform_label = platform
-                # (이전 로직과 달리 드롭다운 선택이므로 사용자가 선택한 값 사용)
-                # 만약 이전처럼 자동분류를 원하시면 아래 주석을 푸세요.
-                # 하지만 드롭다운을 요청하셨기에 선택한 값을 그대로 씁니다.
-
                 if count > 0:
                     avg_price = int(revenue / count)
                 else:
@@ -251,7 +242,6 @@ with tab1:
                 save_new_entry(SHEET_WORK, [date, platform_label, revenue, count, avg_price, memo])
                 
                 st.success("✅ 저장되었습니다!")
-                # [핵심] 입력창 초기화를 위해 form_id 변경
                 reset_forms()
                 time.sleep(0.5)
                 st.rerun()
@@ -294,7 +284,6 @@ with tab1:
                 disabled=["평균단가"]
             )
 
-            # [추가됨] 엑셀 다운로드 버튼
             csv = convert_df_to_csv(edited_df)
             st.download_button(
                 label="📥 엑셀(CSV)로 다운로드",
@@ -374,7 +363,6 @@ with tab2:
                 hide_index=True
             )
 
-            # [추가됨] 엑셀 다운로드 버튼
             csv_bank = convert_df_to_csv(edited_bank)
             st.download_button(
                 label="📥 엑셀(CSV)로 다운로드",
@@ -404,26 +392,17 @@ with tab2:
 with tab3:
     st.header("🛠️ 오토바이 정비 입력")
     
+    # [수정됨] 정비 항목에 '사이드미러' 추가
     maint_items = [
         "휘발유", "오일교환", "미션오일", "브레이크(앞)", "브레이크(뒤)", 
         "에어필터", "구동벨트", "웨이트롤러", "배터리", "점화플러그", 
         "브레이크오일", "냉각수", "구동계", "타이어(앞)", "타이어(뒤)", 
-        "보험료", "백미러"
+        "보험료", "백미러", "사이드미러"
     ]
 
     with st.container(border=True):
         col1, col2 = st.columns(2)
-        # 폼 리셋을 위해 key에 form_id 적용은 안 함(직접 입력란 때문에 form 사용 안 함) -> 대신 session_state 직접 초기화 방식 사용
-        
-        # 정비는 form을 안 쓰고 버튼식이므로, session_state 값을 직접 비우는 방식으로 처리
         if f"m_date" not in st.session_state: st.session_state["m_date"] = datetime.now()
-        if f"m_cost" not in st.session_state: st.session_state["m_cost"] = 0
-        if f"m_km" not in st.session_state: st.session_state["m_km"] = ""
-        if f"m_memo" not in st.session_state: st.session_state["m_memo"] = ""
-
-        # UI
-        # 정비 입력은 Form을 쓰지 않았었음 (직접입력 기능 때문).
-        # 하지만 초기화를 원하시므로, 값을 session_state와 연결합니다.
         
         d = col1.date_input("날짜", datetime.now(), format="YYYY-MM-DD", key=f"m_date_{st.session_state.form_id}")
         selected_item = col2.selectbox("정비 항목", maint_items + ["직접 입력"], key=f"m_item_{st.session_state.form_id}")
@@ -443,7 +422,6 @@ with tab3:
             else:
                 save_new_entry(SHEET_MAINT, [d, final_item, c, k, m])
                 st.success(f"✅ 저장 완료!")
-                # [핵심] 정비 탭도 초기화
                 reset_forms()
                 time.sleep(0.5)
                 st.rerun()
@@ -488,7 +466,6 @@ with tab3:
                     hide_index=True
                 )
 
-                # [추가됨] 엑셀 다운로드 버튼
                 csv_maint = convert_df_to_csv(edited_maint)
                 st.download_button(
                     label="📥 엑셀(CSV)로 다운로드",
