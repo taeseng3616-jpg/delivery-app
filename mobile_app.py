@@ -35,7 +35,7 @@ def reset_forms():
 # [로그인 기능]
 # ==========================================
 def login_screen():
-    # [수정됨] 타이틀 크기 줄임 (Title -> Header)
+    # 로그인 전 화면 타이틀
     st.header("🛵 매출관리")
     
     query_params = st.query_params
@@ -164,8 +164,8 @@ def safe_numeric(series):
 # ================= 메인 화면 =================
 col_title, col_logout = st.columns([4, 1])
 with col_title:
-    # [수정됨] 메인 타이틀 크기 줄임 (Title -> Header)
-    st.header(f"🛵 {CURRENT_USER}님의 매출정비관리")
+    # [수정됨] 폰트 크기 축소 (header -> subheader)
+    st.subheader(f"🛵 {CURRENT_USER}님의 매출정비관리")
 with col_logout:
     if st.button("로그아웃"):
         st.session_state['logged_in'] = False
@@ -221,7 +221,8 @@ tab1, tab2, tab3, tab4 = st.tabs(["📝배달매출", "💰입금관리", "🛠�
 
 # ================= [탭 1] 배달 매출 =================
 with tab1:
-    st.header("📝 금일매출")
+    # [수정됨] 폰트 크기 축소 (header -> subheader)
+    st.subheader("📝 금일매출")
     with st.container(border=True):
         with st.form("work_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
@@ -320,7 +321,8 @@ with tab1:
 
 # ================= [탭 2] 입금 관리 =================
 with tab2:
-    st.header("💰 입금 내역 입력")
+    # [수정됨] 폰트 크기 축소
+    st.subheader("💰 입금 내역 입력")
     with st.container(border=True):
         with st.form("bank_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
@@ -392,7 +394,8 @@ with tab2:
 
 # ================= [탭 3] 정비 관리 =================
 with tab3:
-    st.header("🛠️ 오토바이 정비 입력")
+    # [수정됨] 폰트 크기 축소
+    st.subheader("🛠️ 오토바이 정비 입력")
     
     maint_items = [
         "휘발유", "오일교환", "미션오일", "브레이크(앞)", "브레이크(뒤)", 
