@@ -29,7 +29,6 @@ def load_data(sheet_name):
         rows = worksheet.get_all_values()
 
         if sheet_name == SHEET_WORK:
-            # [변경] 지출, 주행거리 삭제됨
             required_cols = ["날짜", "쿠팡수입", "배민수입", "총수입", "순수익", "배달건수", "메모"]
         elif sheet_name == SHEET_BANK:
             required_cols = ["입금날짜", "입금처", "입금액", "메모"]
@@ -58,7 +57,6 @@ def save_new_entry(sheet_name, data_list):
     worksheet = sh.worksheet(sheet_name)
     if not worksheet.get_all_values():
         if sheet_name == SHEET_WORK:
-            # [변경] 헤더도 변경
             worksheet.append_row(["날짜", "쿠팡수입", "배민수입", "총수입", "순수익", "배달건수", "메모"])
         elif sheet_name == SHEET_BANK:
             worksheet.append_row(["입금날짜", "입금처", "입금액", "메모"])
@@ -102,9 +100,8 @@ df_work = load_data(SHEET_WORK)
 df_bank = load_data(SHEET_BANK)
 df_maint = load_data(SHEET_MAINT)
 
-# 2. 숫자 변환 (수정됨: 지출 컬럼 제외)
+# 2. 숫자 변환
 if not df_work.empty:
-    # '지출' 제거됨
     for col in ['쿠팡수입', '배민수입', '총수입', '순수익', '배달건수']:
         if col in df_work.columns:
             df_work[col] = safe_numeric(df_work[col])
@@ -141,9 +138,8 @@ if st.sidebar.button("목표 저장"):
 # 탭 구성
 tab1, tab2, tab3, tab4 = st.tabs(["📝배달매출", "💰입금관리", "🛠️정비관리", "📊통계"])
 
-# ================= [탭 1] 배달 매출 (수정됨: 지출/거리 삭제) =================
+# ================= [탭 1] 배달 매출 (수정됨: 월별 필터 기능 추가) =================
 with tab1:
-    # [변경] 타이틀 변경
     st.header("📝 금일매출")
     with st.container(border=True):
         with st.form("work_form", clear_on_submit=True):
@@ -155,14 +151,11 @@ with tab1:
             coupang = c1.number_input("쿠팡(원)", step=1000)
             baemin = c2.number_input("배민(원)", step=1000)
             
-            # [변경] 지출, 거리 입력란 삭제됨
             memo = st.text_input("메모")
             
             if st.form_submit_button("💾 입력 내용 저장하기", type="primary"):
                 total = coupang + baemin
-                # [변경] 지출이 없으므로 순수익 = 총수입
                 net = total 
-                # [변경] 저장 리스트에서 expense, distance 삭제
                 save_new_entry(SHEET_WORK, [date, coupang, baemin, total, net, count, memo])
                 st.success("✅ 저장되었습니다!")
                 time.sleep(0.5)
@@ -170,21 +163,66 @@ with tab1:
 
     st.write("---")
     st.subheader("📋 전체 내역 (수정/삭제)")
+    st.caption("💡 **Tip:** 데이터가 많아져도 걱정 마세요. **월별**로 나누어 보여드립니다.")
     
     if not df_work.empty:
-        sorted_df = df_work.sort_values(by="날짜", ascending=False)
-        edited_df = st.data_editor(
-            sorted_df,
-            num_rows="dynamic",
-            use_container_width=True,
-            key="editor_work",
-            hide_index=True
-        )
-        if st.button("🔴 매출 수정/삭제 반영"):
-            with st.spinner("저장 중..."):
-                update_entire_sheet(SHEET_WORK, edited_df)
-            st.success("완벽하게 수정되었습니다!")
-            st.rerun()
+        # [기능 추가] 월별 필터링 로직
+        # 1. 날짜 컬럼을 분석해서 '년-월' 정보 추출
+        df_view = df_work.copy()
+        df_view['날짜_dt'] = pd.to_datetime(df_view['날짜'], errors='coerce')
+        df_view['월'] = df_view['날짜_dt'].dt.strftime('%Y-%m')
+        
+        # 2. 존재하는 '월' 리스트 만들기 (최신순)
+        all_months = sorted(df_view['월'].dropna().unique().tolist(), reverse=True)
+        
+        if all_months:
+            # 3. 월 선택 드롭다운 (기본값: 가장 최신 달)
+            col_sel, _ = st.columns([1, 2])
+            selected_month = col_sel.selectbox("📅 수정할 데이터의 '월(Month)'을 선택하세요", all_months)
+            
+            # 4. 선택한 월의 데이터만 필터링해서 보여주기
+            # (화면에 보여줄 때는 임시로 만든 '날짜_dt', '월' 컬럼은 숨깁니다)
+            current_month_df = df_view[df_view['월'] == selected_month].drop(columns=['날짜_dt', '월'])
+            
+            # 5. 최신 날짜순 정렬
+            sorted_view = current_month_df.sort_values(by="날짜", ascending=False)
+            
+            edited_df = st.data_editor(
+                sorted_view,
+                num_rows="dynamic",
+                use_container_width=True,
+                key="editor_work",
+                hide_index=True
+            )
+            
+            # 6. 저장 버튼 로직 (중요: 전체 데이터 삭제 방지)
+            if st.button("🔴 매출 수정/삭제 반영"):
+                with st.spinner("저장 중..."):
+                    # [핵심 로직]
+                    # 우리가 화면에서 본 건 '이번 달' 데이터뿐입니다.
+                    # 그냥 저장하면 '이번 달' 데이터만 남고 나머지 과거 데이터가 다 지워질 수 있습니다.
+                    # 그래서 "전체 데이터 중 이번 달이 아닌 것" + "수정한 이번 달 데이터"를 합쳐서 저장합니다.
+                    
+                    # (1) 전체 데이터에서 날짜 분석 준비
+                    df_work['날짜_temp'] = pd.to_datetime(df_work['날짜'], errors='coerce')
+                    df_work['월_temp'] = df_work['날짜_temp'].dt.strftime('%Y-%m')
+                    
+                    # (2) 수정하지 않은(다른 달) 데이터 따로 빼두기
+                    df_keep = df_work[df_work['월_temp'] != selected_month].drop(columns=['날짜_temp', '월_temp'])
+                    
+                    # (3) 합치기 (다른 달 데이터 + 방금 수정한 이번 달 데이터)
+                    final_df = pd.concat([df_keep, edited_df], ignore_index=True)
+                    
+                    # (4) 날짜순 예쁘게 정렬
+                    final_df = final_df.sort_values(by="날짜", ascending=False)
+                    
+                    # (5) 구글 시트에 통째로 업데이트
+                    update_entire_sheet(SHEET_WORK, final_df)
+                    
+                st.success("완벽하게 수정되었습니다!")
+                st.rerun()
+        else:
+            st.info("표시할 날짜 데이터가 없습니다.")
     else:
         st.info("아직 저장된 매출 데이터가 없습니다.")
 
