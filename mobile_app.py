@@ -22,7 +22,7 @@ SHEET_BANK = "입금기록"
 SHEET_MAINT = "정비기록"
 SHEET_GOAL = "목표설정"
 
-# --- 데이터 로드 함수 (수정됨: 지출, 주행거리 제거) ---
+# --- 데이터 로드 함수 ---
 def load_data(sheet_name):
     try:
         worksheet = sh.worksheet(sheet_name)
@@ -52,7 +52,7 @@ def load_data(sheet_name):
     except Exception as e:
         return pd.DataFrame()
 
-# --- 데이터 추가 (수정됨: 지출, 주행거리 저장 제외) ---
+# --- 데이터 추가 ---
 def save_new_entry(sheet_name, data_list):
     worksheet = sh.worksheet(sheet_name)
     if not worksheet.get_all_values():
@@ -138,7 +138,7 @@ if st.sidebar.button("목표 저장"):
 # 탭 구성
 tab1, tab2, tab3, tab4 = st.tabs(["📝배달매출", "💰입금관리", "🛠️정비관리", "📊통계"])
 
-# ================= [탭 1] 배달 매출 (수정됨: 월별 필터 기능 추가) =================
+# ================= [탭 1] 배달 매출 =================
 with tab1:
     st.header("📝 금일매출")
     with st.container(border=True):
@@ -166,25 +166,17 @@ with tab1:
     st.caption("💡 **Tip:** 데이터가 많아져도 걱정 마세요. **월별**로 나누어 보여드립니다.")
     
     if not df_work.empty:
-        # [기능 추가] 월별 필터링 로직
-        # 1. 날짜 컬럼을 분석해서 '년-월' 정보 추출
         df_view = df_work.copy()
         df_view['날짜_dt'] = pd.to_datetime(df_view['날짜'], errors='coerce')
         df_view['월'] = df_view['날짜_dt'].dt.strftime('%Y-%m')
         
-        # 2. 존재하는 '월' 리스트 만들기 (최신순)
         all_months = sorted(df_view['월'].dropna().unique().tolist(), reverse=True)
         
         if all_months:
-            # 3. 월 선택 드롭다운 (기본값: 가장 최신 달)
             col_sel, _ = st.columns([1, 2])
             selected_month = col_sel.selectbox("📅 수정할 데이터의 '월(Month)'을 선택하세요", all_months)
             
-            # 4. 선택한 월의 데이터만 필터링해서 보여주기
-            # (화면에 보여줄 때는 임시로 만든 '날짜_dt', '월' 컬럼은 숨깁니다)
             current_month_df = df_view[df_view['월'] == selected_month].drop(columns=['날짜_dt', '월'])
-            
-            # 5. 최신 날짜순 정렬
             sorted_view = current_month_df.sort_values(by="날짜", ascending=False)
             
             edited_df = st.data_editor(
@@ -195,28 +187,15 @@ with tab1:
                 hide_index=True
             )
             
-            # 6. 저장 버튼 로직 (중요: 전체 데이터 삭제 방지)
             if st.button("🔴 매출 수정/삭제 반영"):
                 with st.spinner("저장 중..."):
-                    # [핵심 로직]
-                    # 우리가 화면에서 본 건 '이번 달' 데이터뿐입니다.
-                    # 그냥 저장하면 '이번 달' 데이터만 남고 나머지 과거 데이터가 다 지워질 수 있습니다.
-                    # 그래서 "전체 데이터 중 이번 달이 아닌 것" + "수정한 이번 달 데이터"를 합쳐서 저장합니다.
-                    
-                    # (1) 전체 데이터에서 날짜 분석 준비
                     df_work['날짜_temp'] = pd.to_datetime(df_work['날짜'], errors='coerce')
                     df_work['월_temp'] = df_work['날짜_temp'].dt.strftime('%Y-%m')
                     
-                    # (2) 수정하지 않은(다른 달) 데이터 따로 빼두기
                     df_keep = df_work[df_work['월_temp'] != selected_month].drop(columns=['날짜_temp', '월_temp'])
-                    
-                    # (3) 합치기 (다른 달 데이터 + 방금 수정한 이번 달 데이터)
                     final_df = pd.concat([df_keep, edited_df], ignore_index=True)
-                    
-                    # (4) 날짜순 예쁘게 정렬
                     final_df = final_df.sort_values(by="날짜", ascending=False)
                     
-                    # (5) 구글 시트에 통째로 업데이트
                     update_entire_sheet(SHEET_WORK, final_df)
                     
                 st.success("완벽하게 수정되었습니다!")
@@ -247,23 +226,45 @@ with tab2:
     st.subheader("📋 입금 전체 내역 (수정/삭제)")
 
     if not df_bank.empty:
-        sorted_bank = df_bank.sort_values(by="입금날짜", ascending=False)
-        edited_bank = st.data_editor(
-            sorted_bank,
-            num_rows="dynamic",
-            use_container_width=True,
-            key="editor_bank",
-            hide_index=True
-        )
-        
-        if st.button("🔴 입금 수정/삭제 반영"):
-            update_entire_sheet(SHEET_BANK, edited_bank)
-            st.success("저장 완료!")
-            st.rerun()
+        df_bank_view = df_bank.copy()
+        df_bank_view['날짜_dt'] = pd.to_datetime(df_bank_view['입금날짜'], errors='coerce')
+        df_bank_view['월'] = df_bank_view['날짜_dt'].dt.strftime('%Y-%m')
+
+        all_months_bank = sorted(df_bank_view['월'].dropna().unique().tolist(), reverse=True)
+
+        if all_months_bank:
+            col_sel_bank, _ = st.columns([1, 2])
+            selected_month_bank = col_sel_bank.selectbox("📅 조회할 '월(Month)'을 선택하세요", all_months_bank, key="bank_month_select")
+
+            current_month_bank_df = df_bank_view[df_bank_view['월'] == selected_month_bank].drop(columns=['날짜_dt', '월'])
+            sorted_bank_view = current_month_bank_df.sort_values(by="입금날짜", ascending=False)
+
+            edited_bank = st.data_editor(
+                sorted_bank_view,
+                num_rows="dynamic",
+                use_container_width=True,
+                key="editor_bank",
+                hide_index=True
+            )
+            
+            if st.button("🔴 입금 수정/삭제 반영"):
+                with st.spinner("저장 중..."):
+                    df_bank['날짜_temp'] = pd.to_datetime(df_bank['입금날짜'], errors='coerce')
+                    df_bank['월_temp'] = df_bank['날짜_temp'].dt.strftime('%Y-%m')
+
+                    df_keep_bank = df_bank[df_bank['월_temp'] != selected_month_bank].drop(columns=['날짜_temp', '월_temp'])
+                    final_bank_df = pd.concat([df_keep_bank, edited_bank], ignore_index=True)
+                    final_bank_df = final_bank_df.sort_values(by="입금날짜", ascending=False)
+                    update_entire_sheet(SHEET_BANK, final_bank_df)
+
+                st.success("저장 완료!")
+                st.rerun()
+        else:
+            st.info("표시할 날짜 데이터가 없습니다.")
     else:
         st.info("입금 내역이 없습니다.")
 
-# ================= [탭 3] 정비 관리 =================
+# ================= [탭 3] 정비 관리 (수정됨: 현황판 추가) =================
 with tab3:
     st.header("🛠️ 오토바이 정비 입력")
     
@@ -299,24 +300,48 @@ with tab3:
                 st.rerun()
 
     st.write("---")
-    st.subheader("📋 정비 전체 내역 (수정/삭제)")
     
+    # [추가됨] 정비 현황판 (항목별 최신 내역)
+    st.subheader("🚗 항목별 최신 정비 현황")
+    st.caption("각 항목의 **가장 마지막 정비 기록**입니다.")
+
     if not df_maint.empty:
-        sorted_maint = df_maint.sort_values(by="날짜", ascending=False)
-        edited_maint = st.data_editor(
-            sorted_maint,
-            num_rows="dynamic",
-            use_container_width=True,
-            key="editor_maint",
-            hide_index=True
-        )
+        # 1. 날짜순 정렬 후 항목별 중복 제거 (가장 최신 날짜만 남김)
+        df_status = df_maint.sort_values(by="날짜", ascending=False).drop_duplicates(["항목"])
         
-        if st.button("🔴 정비 수정/삭제 반영"):
-            update_entire_sheet(SHEET_MAINT, edited_maint)
-            st.success("저장 완료!")
-            st.rerun()
+        # 2. 필요한 컬럼만 선택
+        # [항목, 날짜, 주행거리, 메모] 순서로 보여줌
+        df_status_view = df_status[["항목", "날짜", "당시주행거리", "메모"]]
+        
+        # 3. 깔끔한 표로 보여주기 (수정 불가능, 보기 전용)
+        st.dataframe(
+            df_status_view, 
+            hide_index=True, 
+            use_container_width=True
+        )
     else:
         st.info("정비 기록이 없습니다.")
+
+    st.write("---")
+    
+    # 기존 전체 리스트 (수정/삭제용)
+    with st.expander("📋 정비 전체 기록 수정/삭제 (클릭해서 펼치기)"):
+        if not df_maint.empty:
+            sorted_maint = df_maint.sort_values(by="날짜", ascending=False)
+            edited_maint = st.data_editor(
+                sorted_maint,
+                num_rows="dynamic",
+                use_container_width=True,
+                key="editor_maint",
+                hide_index=True
+            )
+            
+            if st.button("🔴 정비 수정/삭제 반영"):
+                update_entire_sheet(SHEET_MAINT, edited_maint)
+                st.success("저장 완료!")
+                st.rerun()
+        else:
+            st.info("정비 기록이 없습니다.")
 
 # ================= [탭 4] 통계 =================
 with tab4:
@@ -329,7 +354,7 @@ with tab4:
             df_stat['년'] = df_stat['날짜'].dt.year
             df_stat['월'] = df_stat['날짜'].dt.strftime('%Y-%m')
             
-            # 1. [월별 분석] (상단)
+            # 1. [월별 분석]
             st.subheader("📊 월별 상세 분석 (Monthly)")
             unique_months = sorted(df_stat['월'].unique().tolist(), reverse=True)
             
@@ -353,7 +378,7 @@ with tab4:
 
             st.write("---")
 
-            # 2. [연간 분석] (하단)
+            # 2. [연간 분석]
             st.subheader("📅 연간 매출 분석 (Yearly)")
             unique_years = sorted(df_stat['년'].unique(), reverse=True)
             if unique_years:
