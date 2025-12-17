@@ -23,7 +23,7 @@ SHEET_MAINT = "정비기록"
 SHEET_GOAL = "목표설정"
 
 # ==========================================
-# [로그인 기능] 아이디 자동 완성 (URL 활용)
+# [로그인 기능]
 # ==========================================
 def login_screen():
     st.title("🛵 배달 CEO 장부 (공용)")
@@ -67,7 +67,7 @@ CURRENT_USER = st.session_state['user_id']
 CURRENT_PW = st.session_state['password']
 
 
-# --- 데이터 로드 함수 (사용자 ID 필터링) ---
+# --- 데이터 로드 함수 ---
 def load_data(sheet_name):
     try:
         worksheet = sh.worksheet(sheet_name)
@@ -94,7 +94,6 @@ def load_data(sheet_name):
         df = df.iloc[:, :len(required_cols)]
         df.columns = required_cols
         
-        # 내 데이터만 필터링
         my_data = df[(df['아이디'] == CURRENT_USER) & (df['비번'] == CURRENT_PW)]
         
         return my_data
@@ -115,7 +114,7 @@ def save_new_entry(sheet_name, data_list):
     full_data = [CURRENT_USER, CURRENT_PW] + data_list
     worksheet.append_row([str(x) for x in full_data])
 
-# --- 업데이트 (내 데이터만 수정) ---
+# --- 업데이트 ---
 def update_my_data(sheet_name, my_edited_df):
     worksheet = sh.worksheet(sheet_name)
     all_rows = worksheet.get_all_values()
@@ -124,7 +123,6 @@ def update_my_data(sheet_name, my_edited_df):
     header = all_rows[0]
     
     all_df = pd.DataFrame(all_rows[1:], columns=header)
-    
     others_df = all_df[all_df['아이디'] != CURRENT_USER]
     
     my_edited_df['아이디'] = CURRENT_USER
@@ -207,7 +205,7 @@ if st.sidebar.button("목표 설정"):
 # 탭 구성
 tab1, tab2, tab3, tab4 = st.tabs(["📝배달매출", "💰입금관리", "🛠️정비관리", "📊통계"])
 
-# ================= [탭 1] 배달 매출 (월별 조회 적용됨) =================
+# ================= [탭 1] 배달 매출 (평균단가 추가됨) =================
 with tab1:
     st.header("📝 금일매출")
     with st.container(border=True):
@@ -235,7 +233,6 @@ with tab1:
     st.caption("💡 다른 사용자의 데이터는 보이지 않으며, **월별**로 선택하여 볼 수 있습니다.")
     
     if not df_work.empty:
-        # 월별 필터링 준비
         df_view = df_work.copy()
         df_view['날짜_dt'] = pd.to_datetime(df_view['날짜'], errors='coerce')
         df_view['월'] = df_view['날짜_dt'].dt.strftime('%Y-%m')
@@ -252,25 +249,43 @@ with tab1:
             cols_to_hide = ['아이디', '비번']
             current_month_df = current_month_df.drop(columns=[c for c in cols_to_hide if c in current_month_df.columns])
 
+            # [핵심] 평균단가 계산 및 추가 (보여주기용)
+            # 0으로 나누기 방지
+            current_month_df['평균단가'] = (current_month_df['총수입'] / current_month_df['배달건수']).fillna(0)
+            # 무한대(inf) 값 처리
+            current_month_df.loc[current_month_df['배달건수'] == 0, '평균단가'] = 0
+            current_month_df['평균단가'] = current_month_df['평균단가'].astype(int)
+
+            # 정렬
             sorted_view = current_month_df.sort_values(by="날짜", ascending=False)
             
+            # 컬럼 순서 조정 (평균단가를 배달건수 옆으로)
+            # 원하는 컬럼 순서: 날짜, 쿠팡, 배민, 총수입, 순수익, 배달건수, 평균단가, 메모
+            view_cols = ["날짜", "쿠팡수입", "배민수입", "총수입", "순수익", "배달건수", "평균단가", "메모"]
+            # 혹시나 컬럼이 없을 때를 대비한 안전장치
+            final_view_cols = [c for c in view_cols if c in sorted_view.columns]
+            sorted_view = sorted_view[final_view_cols]
+
             edited_df = st.data_editor(
                 sorted_view,
                 num_rows="dynamic",
                 use_container_width=True,
                 key="editor_work",
-                hide_index=True
+                hide_index=True,
+                # 평균단가는 계산된 값이므로 수정 불가하게 설정
+                disabled=["평균단가"]
             )
             
             if st.button("🔴 매출 수정/삭제 반영"):
                 with st.spinner("저장 중..."):
+                    # 저장할 때는 '평균단가' 컬럼을 제거해야 함 (구글 시트 구조와 맞추기 위해)
+                    if '평균단가' in edited_df.columns:
+                        edited_df = edited_df.drop(columns=['평균단가'])
+
                     df_work['날짜_temp'] = pd.to_datetime(df_work['날짜'], errors='coerce')
                     df_work['월_temp'] = df_work['날짜_temp'].dt.strftime('%Y-%m')
                     
-                    # 수정한 달이 아닌 나머지 데이터 보존
                     my_data_keep = df_work[df_work['월_temp'] != selected_month].drop(columns=['날짜_temp', '월_temp'])
-                    
-                    # 합치기
                     my_final_df = pd.concat([my_data_keep, edited_df], ignore_index=True)
                     
                     update_my_data(SHEET_WORK, my_final_df)
@@ -346,7 +361,7 @@ with tab2:
     else:
         st.info("입금 내역이 없습니다.")
 
-# ================= [탭 3] 정비 관리 (수정됨: 월별 조회 추가!) =================
+# ================= [탭 3] 정비 관리 (월별 조회 적용됨) =================
 with tab3:
     st.header("🛠️ 오토바이 정비 입력")
     
@@ -393,10 +408,8 @@ with tab3:
 
     st.write("---")
     
-    # [수정된 부분] 정비 내역도 월별로 볼 수 있게 수정함!
     with st.expander("📋 정비 전체 기록 수정/삭제 (클릭)", expanded=True):
         if not df_maint.empty:
-            # 월별 필터링 준비
             df_maint_view = df_maint.copy()
             df_maint_view['날짜_dt'] = pd.to_datetime(df_maint_view['날짜'], errors='coerce')
             df_maint_view['월'] = df_maint_view['날짜_dt'].dt.strftime('%Y-%m')
@@ -407,10 +420,8 @@ with tab3:
                 col_sel_m, _ = st.columns([1, 2])
                 selected_month_maint = col_sel_m.selectbox("📅 정비 내역 '월(Month)' 선택", all_months_maint, key="maint_month_select")
                 
-                # 선택한 달만 필터링
                 current_month_maint_df = df_maint_view[df_maint_view['월'] == selected_month_maint].drop(columns=['날짜_dt', '월'])
                 
-                # 아이디/비번 숨기기
                 cols_to_hide = ['아이디', '비번']
                 current_month_maint_df = current_month_maint_df.drop(columns=[c for c in cols_to_hide if c in current_month_maint_df.columns])
                 
@@ -429,10 +440,8 @@ with tab3:
                         df_maint['날짜_temp'] = pd.to_datetime(df_maint['날짜'], errors='coerce')
                         df_maint['월_temp'] = df_maint['날짜_temp'].dt.strftime('%Y-%m')
                         
-                        # 수정 안 한 달 보존
                         my_data_keep = df_maint[df_maint['월_temp'] != selected_month_maint].drop(columns=['날짜_temp', '월_temp'])
                         
-                        # 합치기
                         my_final_df = pd.concat([my_data_keep, edited_maint], ignore_index=True)
                         
                         update_my_data(SHEET_MAINT, my_final_df)
