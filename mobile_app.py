@@ -4,8 +4,8 @@ import gspread
 from datetime import datetime
 import time
 
-# 1. 페이지 설정
-st.set_page_config(page_title="배달 CEO 장부", page_icon="🛵", layout="centered")
+# 1. 페이지 설정 (브라우저 탭 이름 변경)
+st.set_page_config(page_title="매출현황", page_icon="🛵", layout="centered")
 
 # --- 구글 시트 연결 ---
 try:
@@ -89,7 +89,8 @@ def safe_numeric(series):
     return pd.to_numeric(series.astype(str).str.replace(',', ''), errors='coerce').fillna(0)
 
 # ================= 메인 화면 =================
-st.title("✅ 배달 CEO 장부 (Pro)")
+# [변경됨] 메인 타이틀 변경
+st.title("매출현황")
 
 # 사이드바
 st.sidebar.header("🏆 목표 현황")
@@ -144,7 +145,7 @@ with tab1:
     with st.container(border=True):
         with st.form("work_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
-            # format="YYYY-MM-DD" 추가하여 한국식 날짜 표시
+            # 한국식 날짜 표시
             date = col1.date_input("날짜", datetime.now(), format="YYYY-MM-DD")
             count = col2.number_input("건수", min_value=0)
             
@@ -191,7 +192,6 @@ with tab2:
     with st.container(border=True):
         with st.form("bank_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
-            # format="YYYY-MM-DD" 추가
             d = col1.date_input("입금일", datetime.now(), format="YYYY-MM-DD")
             s = col2.selectbox("입금처", ["쿠팡", "배민", "기타"])
             a = st.number_input("입금액", step=10000)
@@ -236,7 +236,6 @@ with tab3:
 
     with st.container(border=True):
         col1, col2 = st.columns(2)
-        # format="YYYY-MM-DD" 추가
         d = col1.date_input("날짜", datetime.now(), format="YYYY-MM-DD")
         
         selected_item = col2.selectbox("정비 항목", maint_items + ["직접 입력"])
@@ -289,16 +288,13 @@ with tab4:
         
         st.write("### 📅 최근 7일 수익 변화")
         
-        # 차트 데이터를 한글 날짜 포맷으로 변환
         chart_data = df_work.copy()
         chart_data['날짜'] = pd.to_datetime(chart_data['날짜'], errors='coerce')
         chart_data = chart_data.dropna(subset=['날짜'])
         
         if not chart_data.empty:
-            # 날짜를 '12월 14일' 형태로 변환하여 그래프 X축에 한글이 나오도록 함
             chart_data['날짜_str'] = chart_data['날짜'].dt.strftime('%m월 %d일')
             daily_profit = chart_data.groupby('날짜_str')['순수익'].sum().tail(7)
-            
             st.bar_chart(daily_profit)
         else:
             st.info("날짜 데이터가 올바르지 않습니다.")
