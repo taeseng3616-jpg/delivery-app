@@ -35,8 +35,8 @@ def reset_forms():
 # [로그인 기능]
 # ==========================================
 def login_screen():
-    # [수정됨] 타이틀 변경
-    st.title("🛵 매출관리")
+    # [수정됨] 타이틀 크기 줄임 (Title -> Header)
+    st.header("🛵 매출관리")
     
     query_params = st.query_params
     default_id = query_params.get("id", "")
@@ -164,8 +164,8 @@ def safe_numeric(series):
 # ================= 메인 화면 =================
 col_title, col_logout = st.columns([4, 1])
 with col_title:
-    # [수정됨] 로그인 후 메인 타이틀 변경
-    st.title(f"🛵 {CURRENT_USER}님의 매출정비관리")
+    # [수정됨] 메인 타이틀 크기 줄임 (Title -> Header)
+    st.header(f"🛵 {CURRENT_USER}님의 매출정비관리")
 with col_logout:
     if st.button("로그아웃"):
         st.session_state['logged_in'] = False
@@ -548,3 +548,8 @@ with tab4:
                     st.info("데이터가 없습니다.")
             else:
                 st.info("데이터가 없습니다.")
+
+        else:
+             st.info("날짜 데이터가 충분하지 않습니다.")
+    else:
+        st.info("데이터가 없습니다.")
