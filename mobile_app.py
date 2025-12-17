@@ -74,8 +74,8 @@ def load_data(sheet_name):
         rows = worksheet.get_all_values()
 
         if sheet_name == SHEET_WORK:
-            # [수정됨] '평균단가' 컬럼 추가
-            required_cols = ["아이디", "비번", "날짜", "쿠팡수입", "배민수입", "총수입", "순수익", "배달건수", "평균단가", "메모"]
+            # [수정됨] 형님 요청대로 컬럼 변경 (플랫폼, 수입) / 순수익 삭제
+            required_cols = ["아이디", "비번", "날짜", "플랫폼", "수입", "배달건수", "평균단가", "메모"]
         elif sheet_name == SHEET_BANK:
             required_cols = ["아이디", "비번", "입금날짜", "입금처", "입금액", "메모"]
         elif sheet_name == SHEET_MAINT:
@@ -106,8 +106,8 @@ def save_new_entry(sheet_name, data_list):
     worksheet = sh.worksheet(sheet_name)
     if not worksheet.get_all_values():
         if sheet_name == SHEET_WORK:
-            # [수정됨] 헤더에 평균단가 추가
-            worksheet.append_row(["아이디", "비번", "날짜", "쿠팡수입", "배민수입", "총수입", "순수익", "배달건수", "평균단가", "메모"])
+            # [수정됨] 헤더 변경
+            worksheet.append_row(["아이디", "비번", "날짜", "플랫폼", "수입", "배달건수", "평균단가", "메모"])
         elif sheet_name == SHEET_BANK:
             worksheet.append_row(["아이디", "비번", "입금날짜", "입금처", "입금액", "메모"])
         elif sheet_name == SHEET_MAINT:
@@ -169,10 +169,9 @@ df_work = load_data(SHEET_WORK)
 df_bank = load_data(SHEET_BANK)
 df_maint = load_data(SHEET_MAINT)
 
-# 2. 숫자 변환
+# 2. 숫자 변환 (수정됨: '수입' 컬럼만 사용)
 if not df_work.empty:
-    # [수정됨] 평균단가도 숫자로 변환
-    for col in ['쿠팡수입', '배민수입', '총수입', '순수익', '배달건수', '평균단가']:
+    for col in ['수입', '배달건수', '평균단가']:
         if col in df_work.columns:
             df_work[col] = safe_numeric(df_work[col])
 
@@ -186,18 +185,18 @@ if not df_maint.empty:
         if col in df_maint.columns:
             df_maint[col] = safe_numeric(df_maint[col])
 
-# 3. 요약 계산
+# 3. 요약 계산 (수입 기준)
 current_profit = 0
 current_count = 0
 if not df_work.empty:
     current_month = datetime.now().strftime("%Y-%m")
     month_data = df_work[df_work['날짜'].astype(str).str.contains(current_month, na=False)]
-    current_profit = month_data['순수익'].sum()
+    current_profit = month_data['수입'].sum()
     current_count = month_data['배달건수'].sum()
 
 progress = min(current_profit / goal_amount, 1.0) if goal_amount > 0 else 0
 st.sidebar.progress(progress)
-st.sidebar.write(f"💰 이번 달 수익: **{int(current_profit):,}원**")
+st.sidebar.write(f"💰 이번 달 수입: **{int(current_profit):,}원**")
 st.sidebar.write(f"🛵 이번 달 배달: **{int(current_count)}건**")
 
 new_goal = st.sidebar.number_input("목표 금액 (임시)", value=goal_amount, step=100000)
@@ -208,40 +207,39 @@ if st.sidebar.button("목표 설정"):
 # 탭 구성
 tab1, tab2, tab3, tab4 = st.tabs(["📝배달매출", "💰입금관리", "🛠️정비관리", "📊통계"])
 
-# ================= [탭 1] 배달 매출 (구글시트에 평균단가 저장됨) =================
+# ================= [탭 1] 배달 매출 (구조 변경됨!) =================
 with tab1:
     st.header("📝 금일매출")
     with st.container(border=True):
         with st.form("work_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             date = col1.date_input("날짜", datetime.now(), format="YYYY-MM-DD")
-            count = col2.number_input("건수", min_value=0)
+            # [변경] 드롭다운으로 플랫폼 선택
+            platform = col2.selectbox("플랫폼", ["쿠팡", "배민", "일반대행", "기타"])
             
             c1, c2 = st.columns(2)
-            coupang = c1.number_input("쿠팡(원)", step=1000)
-            baemin = c2.number_input("배민(원)", step=1000)
+            # [변경] 통합된 수입 입력
+            revenue = c1.number_input("금일 수입(원)", step=1000)
+            count = c2.number_input("배달 건수", min_value=0)
             
             memo = st.text_input("메모")
             
             if st.form_submit_button("💾 입력 내용 저장하기", type="primary"):
-                total = coupang + baemin
-                net = total
-                
-                # [수정됨] 평균단가 계산 및 저장 준비
+                # 평균단가 계산
                 if count > 0:
-                    avg_price = int(total / count)
+                    avg_price = int(revenue / count)
                 else:
                     avg_price = 0
                 
-                # 저장 리스트에 'avg_price' 추가
-                save_new_entry(SHEET_WORK, [date, coupang, baemin, total, net, count, avg_price, memo])
-                st.success("✅ 저장되었습니다!")
+                # 저장 (플랫폼과 수입을 따로 저장)
+                save_new_entry(SHEET_WORK, [date, platform, revenue, count, avg_price, memo])
+                st.success(f"✅ [{platform}] 매출 저장 완료!")
                 time.sleep(0.5)
                 st.rerun()
 
     st.write("---")
     st.subheader("📋 전체 내역 (수정/삭제)")
-    st.caption("💡 **월별**로 선택하여 볼 수 있습니다.")
+    st.caption("💡 플랫폼별로 데이터가 각각 저장됩니다. **월별**로 조회하세요.")
     
     if not df_work.empty:
         df_view = df_work.copy()
@@ -260,8 +258,8 @@ with tab1:
             cols_to_hide = ['아이디', '비번']
             current_month_df = current_month_df.drop(columns=[c for c in cols_to_hide if c in current_month_df.columns])
 
-            # 컬럼 순서 (평균단가가 포함된 순서)
-            view_cols = ["날짜", "쿠팡수입", "배민수입", "총수입", "순수익", "배달건수", "평균단가", "메모"]
+            # 보여줄 컬럼 정의
+            view_cols = ["날짜", "플랫폼", "수입", "배달건수", "평균단가", "메모"]
             final_view_cols = [c for c in view_cols if c in current_month_df.columns]
             current_month_df = current_month_df[final_view_cols]
             
@@ -272,23 +270,24 @@ with tab1:
                 num_rows="dynamic",
                 use_container_width=True,
                 key="editor_work",
-                hide_index=True
+                hide_index=True,
+                # 평균단가는 자동계산이므로 수정금지
+                disabled=["평균단가"]
             )
             
             if st.button("🔴 매출 수정/삭제 반영"):
                 with st.spinner("저장 중..."):
-                    # [중요] 수정 모드에서 건수나 금액을 바꿨을 수 있으므로 '평균단가' 다시 계산
-                    # 1. 계산을 위해 숫자형으로 확실하게 변환
-                    edited_df['총수입'] = safe_numeric(edited_df['총수입'])
+                    # 1. 숫자 변환
+                    edited_df['수입'] = safe_numeric(edited_df['수입'])
                     edited_df['배달건수'] = safe_numeric(edited_df['배달건수'])
                     
                     # 2. 평균단가 재계산
                     edited_df['평균단가'] = edited_df.apply(
-                        lambda row: int(row['총수입'] / row['배달건수']) if row['배달건수'] > 0 else 0, 
+                        lambda row: int(row['수입'] / row['배달건수']) if row['배달건수'] > 0 else 0, 
                         axis=1
                     )
 
-                    # 3. 데이터 합치기 로직
+                    # 3. 합치기
                     df_work['날짜_temp'] = pd.to_datetime(df_work['날짜'], errors='coerce')
                     df_work['월_temp'] = df_work['날짜_temp'].dt.strftime('%Y-%m')
                     
@@ -297,7 +296,7 @@ with tab1:
                     
                     update_my_data(SHEET_WORK, my_final_df)
                     
-                st.success("완벽하게 수정 및 재계산되었습니다!")
+                st.success("완벽하게 수정되었습니다!")
                 st.rerun()
         else:
             st.info("표시할 데이터가 없습니다.")
@@ -460,7 +459,7 @@ with tab3:
         else:
             st.info("기록이 없습니다.")
 
-# ================= [탭 4] 통계 =================
+# ================= [탭 4] 통계 (수정됨: '수입' 컬럼 기준 집계) =================
 with tab4:
     if not df_work.empty:
         df_stat = df_work.copy()
@@ -478,16 +477,18 @@ with tab4:
                 selected_month = st.selectbox("조회할 월 선택", unique_months)
                 month_data = df_stat[df_stat['월'] == selected_month]
 
-                stat_profit = month_data['순수익'].sum()
+                # [변경] 순수익 -> 수입
+                stat_profit = month_data['수입'].sum()
                 stat_count = month_data['배달건수'].sum()
 
                 m1, m2 = st.columns(2)
-                m1.metric(f"{selected_month} 총 순수익", f"{int(stat_profit):,}원")
+                m1.metric(f"{selected_month} 총 수입", f"{int(stat_profit):,}원")
                 m2.metric(f"{selected_month} 총 배달", f"{int(stat_count)}건")
 
                 st.write(f"###### 📈 {selected_month} 일별 수익 변화")
                 month_data['일'] = month_data['날짜'].dt.strftime('%d일')
-                daily_chart = month_data.groupby('일')['순수익'].sum()
+                # 같은 날짜에 쿠팡, 배민 등 여러 건이 있을 수 있으므로 합산
+                daily_chart = month_data.groupby('일')['수입'].sum()
                 st.bar_chart(daily_chart)
             else:
                 st.info("데이터가 없습니다.")
@@ -501,15 +502,16 @@ with tab4:
                 year_data = df_stat[df_stat['년'] == selected_year]
                 
                 if not year_data.empty:
-                    total_profit_year = year_data['순수익'].sum()
+                    # [변경] 순수익 -> 수입
+                    total_profit_year = year_data['수입'].sum()
                     total_count_year = year_data['배달건수'].sum()
                     
                     c1, c2 = st.columns(2)
-                    c1.metric(f"{selected_year}년 총 순수익", f"{int(total_profit_year):,}원")
+                    c1.metric(f"{selected_year}년 총 수입", f"{int(total_profit_year):,}원")
                     c2.metric(f"{selected_year}년 총 배달", f"{int(total_count_year):,}건")
                     
                     year_data['월_숫자'] = year_data['날짜'].dt.month
-                    monthly_chart = year_data.groupby('월_숫자')['순수익'].sum()
+                    monthly_chart = year_data.groupby('월_숫자')['수입'].sum()
                     st.bar_chart(monthly_chart)
                 else:
                     st.info("데이터가 없습니다.")
