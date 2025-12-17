@@ -22,14 +22,15 @@ SHEET_BANK = "입금기록"
 SHEET_MAINT = "정비기록"
 SHEET_GOAL = "목표설정"
 
-# --- 데이터 로드 함수 ---
+# --- 데이터 로드 함수 (수정됨: 지출, 주행거리 제거) ---
 def load_data(sheet_name):
     try:
         worksheet = sh.worksheet(sheet_name)
         rows = worksheet.get_all_values()
 
         if sheet_name == SHEET_WORK:
-            required_cols = ["날짜", "쿠팡수입", "배민수입", "총수입", "지출", "순수익", "배달건수", "주행거리", "메모"]
+            # [변경] 지출, 주행거리 삭제됨
+            required_cols = ["날짜", "쿠팡수입", "배민수입", "총수입", "순수익", "배달건수", "메모"]
         elif sheet_name == SHEET_BANK:
             required_cols = ["입금날짜", "입금처", "입금액", "메모"]
         elif sheet_name == SHEET_MAINT:
@@ -52,12 +53,13 @@ def load_data(sheet_name):
     except Exception as e:
         return pd.DataFrame()
 
-# --- 데이터 추가 ---
+# --- 데이터 추가 (수정됨: 지출, 주행거리 저장 제외) ---
 def save_new_entry(sheet_name, data_list):
     worksheet = sh.worksheet(sheet_name)
     if not worksheet.get_all_values():
         if sheet_name == SHEET_WORK:
-            worksheet.append_row(["날짜", "쿠팡수입", "배민수입", "총수입", "지출", "순수익", "배달건수", "주행거리", "메모"])
+            # [변경] 헤더도 변경
+            worksheet.append_row(["날짜", "쿠팡수입", "배민수입", "총수입", "순수익", "배달건수", "메모"])
         elif sheet_name == SHEET_BANK:
             worksheet.append_row(["입금날짜", "입금처", "입금액", "메모"])
         elif sheet_name == SHEET_MAINT:
@@ -100,9 +102,10 @@ df_work = load_data(SHEET_WORK)
 df_bank = load_data(SHEET_BANK)
 df_maint = load_data(SHEET_MAINT)
 
-# 2. 숫자 변환
+# 2. 숫자 변환 (수정됨: 지출 컬럼 제외)
 if not df_work.empty:
-    for col in ['쿠팡수입', '배민수입', '총수입', '지출', '순수익', '배달건수']:
+    # '지출' 제거됨
+    for col in ['쿠팡수입', '배민수입', '총수입', '순수익', '배달건수']:
         if col in df_work.columns:
             df_work[col] = safe_numeric(df_work[col])
 
@@ -138,9 +141,10 @@ if st.sidebar.button("목표 저장"):
 # 탭 구성
 tab1, tab2, tab3, tab4 = st.tabs(["📝배달매출", "💰입금관리", "🛠️정비관리", "📊통계"])
 
-# ================= [탭 1] 배달 매출 =================
+# ================= [탭 1] 배달 매출 (수정됨: 지출/거리 삭제) =================
 with tab1:
-    st.header("📝 오늘의 매출 입력")
+    # [변경] 타이틀 변경
+    st.header("📝 금일매출")
     with st.container(border=True):
         with st.form("work_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
@@ -151,15 +155,15 @@ with tab1:
             coupang = c1.number_input("쿠팡(원)", step=1000)
             baemin = c2.number_input("배민(원)", step=1000)
             
-            c3, c4 = st.columns(2)
-            expense = c3.number_input("지출(원)", step=1000)
-            distance = c4.text_input("거리(km)")
+            # [변경] 지출, 거리 입력란 삭제됨
             memo = st.text_input("메모")
             
             if st.form_submit_button("💾 입력 내용 저장하기", type="primary"):
                 total = coupang + baemin
-                net = total - expense
-                save_new_entry(SHEET_WORK, [date, coupang, baemin, total, expense, net, count, distance, memo])
+                # [변경] 지출이 없으므로 순수익 = 총수입
+                net = total 
+                # [변경] 저장 리스트에서 expense, distance 삭제
+                save_new_entry(SHEET_WORK, [date, coupang, baemin, total, net, count, memo])
                 st.success("✅ 저장되었습니다!")
                 time.sleep(0.5)
                 st.rerun()
@@ -276,32 +280,25 @@ with tab3:
     else:
         st.info("정비 기록이 없습니다.")
 
-# ================= [탭 4] 통계 (수정됨: 월별 위, 연간 아래) =================
+# ================= [탭 4] 통계 =================
 with tab4:
     if not df_work.empty:
-        # 데이터 전처리
         df_stat = df_work.copy()
         df_stat['날짜'] = pd.to_datetime(df_stat['날짜'], errors='coerce')
         df_stat = df_stat.dropna(subset=['날짜'])
         
         if not df_stat.empty:
             df_stat['년'] = df_stat['날짜'].dt.year
-            df_stat['월'] = df_stat['날짜'].dt.strftime('%Y-%m') # 2025-12 형태
+            df_stat['월'] = df_stat['날짜'].dt.strftime('%Y-%m')
             
-            # ----------------------------------------------------------
-            # 1. [월별 상세 분석] (사용자 요청: 상단 배치)
-            # ----------------------------------------------------------
+            # 1. [월별 분석] (상단)
             st.subheader("📊 월별 상세 분석 (Monthly)")
-            
             unique_months = sorted(df_stat['월'].unique().tolist(), reverse=True)
             
             if unique_months:
                 selected_month = st.selectbox("조회할 월을 선택하세요", unique_months)
-
-                # 선택한 월 데이터 필터링
                 month_data = df_stat[df_stat['월'] == selected_month]
 
-                # 해당 월 통계
                 stat_profit = month_data['순수익'].sum()
                 stat_count = month_data['배달건수'].sum()
 
@@ -310,26 +307,19 @@ with tab4:
                 m2.metric(f"{selected_month} 총 배달", f"{int(stat_count)}건")
 
                 st.write(f"###### 📈 {selected_month} 일별 수익 변화")
-
-                # 일별 그래프
                 month_data['일'] = month_data['날짜'].dt.strftime('%d일')
                 daily_chart = month_data.groupby('일')['순수익'].sum()
                 st.bar_chart(daily_chart)
             else:
                 st.info("월별 데이터가 없습니다.")
 
-            st.write("---") # 구분선
+            st.write("---")
 
-            # ----------------------------------------------------------
-            # 2. [연간 매출 분석] (사용자 요청: 하단 배치)
-            # ----------------------------------------------------------
+            # 2. [연간 분석] (하단)
             st.subheader("📅 연간 매출 분석 (Yearly)")
-            
             unique_years = sorted(df_stat['년'].unique(), reverse=True)
             if unique_years:
                 selected_year = st.selectbox("조회할 년도를 선택하세요", unique_years)
-                
-                # 선택한 년도 데이터 필터링
                 year_data = df_stat[df_stat['년'] == selected_year]
                 
                 if not year_data.empty:
@@ -340,12 +330,9 @@ with tab4:
                     c1.metric(f"{selected_year}년 총 순수익", f"{int(total_profit_year):,}원")
                     c2.metric(f"{selected_year}년 총 배달", f"{int(total_count_year):,}건")
                     
-                    # 월별 그래프 그리기
                     year_data['월_숫자'] = year_data['날짜'].dt.month
                     monthly_chart = year_data.groupby('월_숫자')['순수익'].sum()
-                    
                     st.bar_chart(monthly_chart)
-                    st.caption(f"👆 {selected_year}년의 월별 수익 흐름입니다.")
                 else:
                     st.info("선택한 년도의 데이터가 없습니다.")
             else:
