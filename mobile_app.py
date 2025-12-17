@@ -74,7 +74,8 @@ def load_data(sheet_name):
         rows = worksheet.get_all_values()
 
         if sheet_name == SHEET_WORK:
-            required_cols = ["아이디", "비번", "날짜", "쿠팡수입", "배민수입", "총수입", "순수익", "배달건수", "메모"]
+            # [수정됨] '평균단가' 컬럼 추가
+            required_cols = ["아이디", "비번", "날짜", "쿠팡수입", "배민수입", "총수입", "순수익", "배달건수", "평균단가", "메모"]
         elif sheet_name == SHEET_BANK:
             required_cols = ["아이디", "비번", "입금날짜", "입금처", "입금액", "메모"]
         elif sheet_name == SHEET_MAINT:
@@ -105,7 +106,8 @@ def save_new_entry(sheet_name, data_list):
     worksheet = sh.worksheet(sheet_name)
     if not worksheet.get_all_values():
         if sheet_name == SHEET_WORK:
-            worksheet.append_row(["아이디", "비번", "날짜", "쿠팡수입", "배민수입", "총수입", "순수익", "배달건수", "메모"])
+            # [수정됨] 헤더에 평균단가 추가
+            worksheet.append_row(["아이디", "비번", "날짜", "쿠팡수입", "배민수입", "총수입", "순수익", "배달건수", "평균단가", "메모"])
         elif sheet_name == SHEET_BANK:
             worksheet.append_row(["아이디", "비번", "입금날짜", "입금처", "입금액", "메모"])
         elif sheet_name == SHEET_MAINT:
@@ -169,7 +171,8 @@ df_maint = load_data(SHEET_MAINT)
 
 # 2. 숫자 변환
 if not df_work.empty:
-    for col in ['쿠팡수입', '배민수입', '총수입', '순수익', '배달건수']:
+    # [수정됨] 평균단가도 숫자로 변환
+    for col in ['쿠팡수입', '배민수입', '총수입', '순수익', '배달건수', '평균단가']:
         if col in df_work.columns:
             df_work[col] = safe_numeric(df_work[col])
 
@@ -205,7 +208,7 @@ if st.sidebar.button("목표 설정"):
 # 탭 구성
 tab1, tab2, tab3, tab4 = st.tabs(["📝배달매출", "💰입금관리", "🛠️정비관리", "📊통계"])
 
-# ================= [탭 1] 배달 매출 (평균단가 추가됨) =================
+# ================= [탭 1] 배달 매출 (구글시트에 평균단가 저장됨) =================
 with tab1:
     st.header("📝 금일매출")
     with st.container(border=True):
@@ -222,15 +225,23 @@ with tab1:
             
             if st.form_submit_button("💾 입력 내용 저장하기", type="primary"):
                 total = coupang + baemin
-                net = total 
-                save_new_entry(SHEET_WORK, [date, coupang, baemin, total, net, count, memo])
+                net = total
+                
+                # [수정됨] 평균단가 계산 및 저장 준비
+                if count > 0:
+                    avg_price = int(total / count)
+                else:
+                    avg_price = 0
+                
+                # 저장 리스트에 'avg_price' 추가
+                save_new_entry(SHEET_WORK, [date, coupang, baemin, total, net, count, avg_price, memo])
                 st.success("✅ 저장되었습니다!")
                 time.sleep(0.5)
                 st.rerun()
 
     st.write("---")
     st.subheader("📋 전체 내역 (수정/삭제)")
-    st.caption("💡 다른 사용자의 데이터는 보이지 않으며, **월별**로 선택하여 볼 수 있습니다.")
+    st.caption("💡 **월별**로 선택하여 볼 수 있습니다.")
     
     if not df_work.empty:
         df_view = df_work.copy()
@@ -249,39 +260,35 @@ with tab1:
             cols_to_hide = ['아이디', '비번']
             current_month_df = current_month_df.drop(columns=[c for c in cols_to_hide if c in current_month_df.columns])
 
-            # [핵심] 평균단가 계산 및 추가 (보여주기용)
-            # 0으로 나누기 방지
-            current_month_df['평균단가'] = (current_month_df['총수입'] / current_month_df['배달건수']).fillna(0)
-            # 무한대(inf) 값 처리
-            current_month_df.loc[current_month_df['배달건수'] == 0, '평균단가'] = 0
-            current_month_df['평균단가'] = current_month_df['평균단가'].astype(int)
-
-            # 정렬
+            # 컬럼 순서 (평균단가가 포함된 순서)
+            view_cols = ["날짜", "쿠팡수입", "배민수입", "총수입", "순수익", "배달건수", "평균단가", "메모"]
+            final_view_cols = [c for c in view_cols if c in current_month_df.columns]
+            current_month_df = current_month_df[final_view_cols]
+            
             sorted_view = current_month_df.sort_values(by="날짜", ascending=False)
             
-            # 컬럼 순서 조정 (평균단가를 배달건수 옆으로)
-            # 원하는 컬럼 순서: 날짜, 쿠팡, 배민, 총수입, 순수익, 배달건수, 평균단가, 메모
-            view_cols = ["날짜", "쿠팡수입", "배민수입", "총수입", "순수익", "배달건수", "평균단가", "메모"]
-            # 혹시나 컬럼이 없을 때를 대비한 안전장치
-            final_view_cols = [c for c in view_cols if c in sorted_view.columns]
-            sorted_view = sorted_view[final_view_cols]
-
             edited_df = st.data_editor(
                 sorted_view,
                 num_rows="dynamic",
                 use_container_width=True,
                 key="editor_work",
-                hide_index=True,
-                # 평균단가는 계산된 값이므로 수정 불가하게 설정
-                disabled=["평균단가"]
+                hide_index=True
             )
             
             if st.button("🔴 매출 수정/삭제 반영"):
                 with st.spinner("저장 중..."):
-                    # 저장할 때는 '평균단가' 컬럼을 제거해야 함 (구글 시트 구조와 맞추기 위해)
-                    if '평균단가' in edited_df.columns:
-                        edited_df = edited_df.drop(columns=['평균단가'])
+                    # [중요] 수정 모드에서 건수나 금액을 바꿨을 수 있으므로 '평균단가' 다시 계산
+                    # 1. 계산을 위해 숫자형으로 확실하게 변환
+                    edited_df['총수입'] = safe_numeric(edited_df['총수입'])
+                    edited_df['배달건수'] = safe_numeric(edited_df['배달건수'])
+                    
+                    # 2. 평균단가 재계산
+                    edited_df['평균단가'] = edited_df.apply(
+                        lambda row: int(row['총수입'] / row['배달건수']) if row['배달건수'] > 0 else 0, 
+                        axis=1
+                    )
 
+                    # 3. 데이터 합치기 로직
                     df_work['날짜_temp'] = pd.to_datetime(df_work['날짜'], errors='coerce')
                     df_work['월_temp'] = df_work['날짜_temp'].dt.strftime('%Y-%m')
                     
@@ -290,14 +297,14 @@ with tab1:
                     
                     update_my_data(SHEET_WORK, my_final_df)
                     
-                st.success("완벽하게 수정되었습니다!")
+                st.success("완벽하게 수정 및 재계산되었습니다!")
                 st.rerun()
         else:
             st.info("표시할 데이터가 없습니다.")
     else:
         st.info("저장된 매출 데이터가 없습니다.")
 
-# ================= [탭 2] 입금 관리 (월별 조회 적용됨) =================
+# ================= [탭 2] 입금 관리 =================
 with tab2:
     st.header("💰 입금 내역 입력")
     with st.container(border=True):
@@ -361,7 +368,7 @@ with tab2:
     else:
         st.info("입금 내역이 없습니다.")
 
-# ================= [탭 3] 정비 관리 (월별 조회 적용됨) =================
+# ================= [탭 3] 정비 관리 =================
 with tab3:
     st.header("🛠️ 오토바이 정비 입력")
     
