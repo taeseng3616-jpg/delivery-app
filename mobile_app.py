@@ -23,28 +23,45 @@ SHEET_MAINT = "정비기록"
 SHEET_GOAL = "목표설정"
 
 # ==========================================
-# [로그인 기능] 단순화된 로그인 처리
+# [로그인 기능] 아이디 자동 완성 (URL 활용)
 # ==========================================
 def login_screen():
     st.title("🛵 배달 CEO 장부 (공용)")
+    
+    # 1. URL에서 아이디 가져오기 (즐겨찾기용)
+    # Streamlit 최신 버전에 맞춰 query_params 사용
+    query_params = st.query_params
+    default_id = query_params.get("id", "")
+
     st.write("본인의 아이디와 비밀번호를 사용하여 로그인하세요.")
     
     with st.form("login_form"):
-        user_id = st.text_input("아이디 (닉네임)", placeholder="예: 라이더1")
-        password = st.text_input("비밀번호", type="password", placeholder="비밀번호 설정")
+        # value에 URL에서 가져온 아이디를 넣어줌
+        user_id = st.text_input("아이디 (닉네임)", value=default_id, placeholder="예: 라이더1")
+        # autocomplete="current-password"는 브라우저에게 "이거 비번이니까 저장해!"라고 알려주는 힌트
+        password = st.text_input("비밀번호", type="password", placeholder="비밀번호")
+        
         submit = st.form_submit_button("로그인 / 시작하기", type="primary")
         
         if submit:
             if user_id and password:
-                # 세션에 사용자 정보 저장
+                # 로그인 성공 처리
                 st.session_state['logged_in'] = True
                 st.session_state['user_id'] = user_id
-                st.session_state['password'] = password # 간단한 검증용 (실제론 DB가 필요하지만 시트로 대체)
+                st.session_state['password'] = password
+                
+                # [핵심] 로그인 성공 시 URL에 아이디 박아넣기
+                st.query_params["id"] = user_id
+                
                 st.success(f"반갑습니다, {user_id}님!")
-                time.sleep(0.5)
+                st.toast("💡 주소창을 확인하세요! 아이디가 포함된 주소로 변경되었습니다. 이 페이지를 즐겨찾기 하세요.", icon="⭐")
+                time.sleep(1.5)
                 st.rerun()
             else:
                 st.warning("아이디와 비밀번호를 모두 입력해주세요.")
+    
+    # 팁 문구 추가
+    st.info("💡 **팁:** 로그인 후 브라우저(삼성인터넷/크롬)에서 **'비밀번호 저장'**을 누르시면 다음부터 자동으로 입력됩니다.")
 
 # 로그인이 안 되어 있으면 로그인 화면만 보여주고 중단
 if 'logged_in' not in st.session_state:
@@ -65,7 +82,6 @@ def load_data(sheet_name):
         worksheet = sh.worksheet(sheet_name)
         rows = worksheet.get_all_values()
 
-        # [변경] 맨 앞에 '아이디', '비번' 컬럼 추가됨
         if sheet_name == SHEET_WORK:
             required_cols = ["아이디", "비번", "날짜", "쿠팡수입", "배민수입", "총수입", "순수익", "배달건수", "메모"]
         elif sheet_name == SHEET_BANK:
@@ -87,8 +103,7 @@ def load_data(sheet_name):
         df = df.iloc[:, :len(required_cols)]
         df.columns = required_cols
         
-        # [핵심] 현재 로그인한 사용자의 데이터만 필터링해서 리턴!
-        # 비밀번호까지 일치하는지 확인 (간단한 보안)
+        # [핵심] 현재 로그인한 사용자의 데이터만 필터링
         my_data = df[(df['아이디'] == CURRENT_USER) & (df['비번'] == CURRENT_PW)]
         
         return my_data
@@ -98,8 +113,6 @@ def load_data(sheet_name):
 # --- 데이터 추가 (수정됨: 아이디/비번 자동 저장) ---
 def save_new_entry(sheet_name, data_list):
     worksheet = sh.worksheet(sheet_name)
-    
-    # 헤더 정의
     if not worksheet.get_all_values():
         if sheet_name == SHEET_WORK:
             worksheet.append_row(["아이디", "비번", "날짜", "쿠팡수입", "배민수입", "총수입", "순수익", "배달건수", "메모"])
@@ -108,41 +121,34 @@ def save_new_entry(sheet_name, data_list):
         elif sheet_name == SHEET_MAINT:
             worksheet.append_row(["아이디", "비번", "날짜", "항목", "금액", "당시주행거리", "메모"])
     
-    # [핵심] 데이터 앞에 내 아이디와 비번을 붙여서 저장
     full_data = [CURRENT_USER, CURRENT_PW] + data_list
     worksheet.append_row([str(x) for x in full_data])
 
-# --- 업데이트 (수정됨: 내 데이터만 수정하고 남의 건 건드리지 않음) ---
+# --- 업데이트 (수정됨: 내 데이터만 수정) ---
 def update_my_data(sheet_name, my_edited_df):
     worksheet = sh.worksheet(sheet_name)
     all_rows = worksheet.get_all_values()
     
-    # 1. 헤더 가져오기
-    if not all_rows: return # 데이터 없음
+    if not all_rows: return
     header = all_rows[0]
     
-    # 2. 전체 데이터 DataFrame으로 변환
     all_df = pd.DataFrame(all_rows[1:], columns=header)
     
-    # 3. 내 데이터가 아닌 것들만 남기기 (남의 데이터 보존)
+    # 남의 데이터 보존
     others_df = all_df[all_df['아이디'] != CURRENT_USER]
     
-    # 4. 내 수정된 데이터에 아이디/비번 다시 확실히 박아넣기 (수정 중 실수 방지)
+    # 내 데이터 갱신
     my_edited_df['아이디'] = CURRENT_USER
     my_edited_df['비번'] = CURRENT_PW
     
-    # 5. 합치기 (남의 데이터 + 나의 수정된 데이터)
     final_df = pd.concat([others_df, my_edited_df], ignore_index=True)
     
-    # 6. 구글 시트 클리어 후 재작성
     worksheet.clear()
     worksheet.update([final_df.columns.values.tolist()] + final_df.values.tolist())
 
 
-# --- 목표 관리 (사용자별 목표 분리 필요 - 임시로 300 고정) ---
-# 목표 기능은 사용자별로 저장하려면 로직이 복잡해져서 일단 공통 기본값 or 세션값으로 대체
+# --- 목표 관리 (임시 세션 저장) ---
 def get_user_goal():
-    # 목표 설정 시트는 공유하기 어려우므로, 일단 개인별 목표는 세션에만 유지하거나 기본값 사용
     if 'my_goal' not in st.session_state:
         st.session_state['my_goal'] = 3000000
     return st.session_state['my_goal']
@@ -162,13 +168,15 @@ with col_title:
 with col_logout:
     if st.button("로그아웃"):
         st.session_state['logged_in'] = False
+        # 로그아웃 시 URL에서 아이디 제거 (보안)
+        st.query_params.clear()
         st.rerun()
 
 # 사이드바
 st.sidebar.header(f"👤 {CURRENT_USER}님 현황")
 goal_amount = get_user_goal()
 
-# 1. 데이터 로드 (내 것만 가져옴)
+# 1. 데이터 로드
 df_work = load_data(SHEET_WORK)
 df_bank = load_data(SHEET_BANK)
 df_maint = load_data(SHEET_MAINT)
@@ -250,7 +258,6 @@ with tab1:
             selected_month = col_sel.selectbox("📅 수정할 데이터의 '월(Month)'을 선택하세요", all_months)
             
             current_month_df = df_view[df_view['월'] == selected_month].drop(columns=['날짜_dt', '월'])
-            # 화면에서 아이디, 비번 컬럼은 숨김 (굳이 볼 필요 없으므로)
             cols_to_hide = ['아이디', '비번']
             current_month_df = current_month_df.drop(columns=[c for c in cols_to_hide if c in current_month_df.columns])
 
@@ -266,22 +273,12 @@ with tab1:
             
             if st.button("🔴 매출 수정/삭제 반영"):
                 with st.spinner("저장 중..."):
-                    # 1. 내 전체 데이터 로드 (필터링되지 않은 원본 필요하지만 여기선 이미 필터링됨)
-                    # -> update_my_data 함수에서 처리함
-                    
-                    # 2. 이번달 말고 다른달 데이터 보존 로직
-                    # (현재 df_work는 '내 데이터' 전체임)
                     df_work['날짜_temp'] = pd.to_datetime(df_work['날짜'], errors='coerce')
                     df_work['월_temp'] = df_work['날짜_temp'].dt.strftime('%Y-%m')
                     
-                    # 내 데이터 중 수정 안 한 달
                     my_data_keep = df_work[df_work['월_temp'] != selected_month].drop(columns=['날짜_temp', '월_temp'])
-                    
-                    # 내 데이터 합치기 (다른달 + 수정한 이번달)
-                    # edited_df에는 아이디/비번이 없을 수 있으므로 update_my_data에서 처리
                     my_final_df = pd.concat([my_data_keep, edited_df], ignore_index=True)
                     
-                    # 전체 업데이트 요청
                     update_my_data(SHEET_WORK, my_final_df)
                     
                 st.success("완벽하게 수정되었습니다!")
