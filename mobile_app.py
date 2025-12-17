@@ -4,7 +4,7 @@ import gspread
 from datetime import datetime
 import time
 
-# 1. 페이지 설정 (브라우저 탭 이름 변경)
+# 1. 페이지 설정
 st.set_page_config(page_title="매출현황", page_icon="🛵", layout="centered")
 
 # --- 구글 시트 연결 ---
@@ -89,7 +89,6 @@ def safe_numeric(series):
     return pd.to_numeric(series.astype(str).str.replace(',', ''), errors='coerce').fillna(0)
 
 # ================= 메인 화면 =================
-# [변경됨] 메인 타이틀 변경
 st.title("매출현황")
 
 # 사이드바
@@ -145,7 +144,6 @@ with tab1:
     with st.container(border=True):
         with st.form("work_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
-            # 한국식 날짜 표시
             date = col1.date_input("날짜", datetime.now(), format="YYYY-MM-DD")
             count = col2.number_input("건수", min_value=0)
             
@@ -278,25 +276,46 @@ with tab3:
     else:
         st.info("정비 기록이 없습니다.")
 
-# ================= [탭 4] 통계 =================
+# ================= [탭 4] 통계 (수정됨: 월별 드롭다운 조회 기능) =================
 with tab4:
-    st.subheader("📊 매출 분석")
+    st.subheader("📊 월별 매출 분석")
+    
     if not df_work.empty:
-        c1, c2 = st.columns(2)
-        c1.metric("이번 달 총 순수익", f"{int(current_profit):,}원")
-        c2.metric("이번 달 총 배달", f"{int(current_count)}건")
-        
-        st.write("### 📅 최근 7일 수익 변화")
-        
-        chart_data = df_work.copy()
-        chart_data['날짜'] = pd.to_datetime(chart_data['날짜'], errors='coerce')
-        chart_data = chart_data.dropna(subset=['날짜'])
-        
-        if not chart_data.empty:
-            chart_data['날짜_str'] = chart_data['날짜'].dt.strftime('%m월 %d일')
-            daily_profit = chart_data.groupby('날짜_str')['순수익'].sum().tail(7)
-            st.bar_chart(daily_profit)
+        # 1. 데이터 가공 (날짜 인식)
+        df_stat = df_work.copy()
+        df_stat['날짜'] = pd.to_datetime(df_stat['날짜'], errors='coerce')
+        df_stat = df_stat.dropna(subset=['날짜'])
+
+        # 2. 존재하는 '년-월' 목록 추출 (예: ['2025-12', '2025-11'])
+        df_stat['월'] = df_stat['날짜'].dt.strftime('%Y-%m')
+        unique_months = sorted(df_stat['월'].unique().tolist(), reverse=True)
+
+        if unique_months:
+            # 3. 드롭다운 생성 (기본값: 가장 최근 달)
+            selected_month = st.selectbox("📅 조회할 월을 선택하세요", unique_months)
+
+            # 4. 선택한 월의 데이터만 필터링
+            month_data = df_stat[df_stat['월'] == selected_month]
+
+            # 5. 통계 계산
+            stat_profit = month_data['순수익'].sum()
+            stat_count = month_data['배달건수'].sum()
+
+            # 6. 화면 표시
+            c1, c2 = st.columns(2)
+            c1.metric(f"{selected_month} 총 순수익", f"{int(stat_profit):,}원")
+            c2.metric(f"{selected_month} 총 배달", f"{int(stat_count)}건")
+
+            st.write("---")
+            st.write(f"### 📈 {selected_month} 일별 수익 그래프")
+
+            # 그래프 그리기 (X축을 일(Day)로 표시)
+            month_data['일'] = month_data['날짜'].dt.strftime('%d일')
+            # 같은 날짜에 여러 건이 있을 수 있으므로 날짜별 합계 계산
+            daily_chart = month_data.groupby('일')['순수익'].sum()
+            
+            st.bar_chart(daily_chart)
         else:
-            st.info("날짜 데이터가 올바르지 않습니다.")
+             st.info("통계에 사용할 날짜 데이터가 충분하지 않습니다.")
     else:
-        st.info("데이터가 충분하지 않습니다.")
+        st.info("데이터가 없습니다.")
