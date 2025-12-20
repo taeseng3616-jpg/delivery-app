@@ -156,14 +156,13 @@ def set_user_goal(amount):
     st.session_state['my_goal'] = amount
 
 
-# --- 숫자 변환 도우미 (업그레이드됨: 쉼표, km, 단위 제거 후 숫자로 변환) ---
+# --- 숫자 변환 도우미 (쉼표, km 제거 후 숫자로 변환) ---
 def safe_numeric(series):
     return pd.to_numeric(
         series.astype(str)
         .str.replace(',', '')
         .str.replace('km', '', case=False)
         .str.replace('Km', '', case=False)
-        .str.replace('KM', '', case=False)
         .str.strip(), 
         errors='coerce'
     ).fillna(0)
@@ -187,7 +186,7 @@ df_work = load_data(SHEET_WORK)
 df_bank = load_data(SHEET_BANK)
 df_maint = load_data(SHEET_MAINT)
 
-# 2. 숫자 변환
+# 2. 숫자 변환 (계산용)
 if not df_work.empty:
     for col in ['수입', '배달건수', '평균단가']:
         if col in df_work.columns:
@@ -217,7 +216,7 @@ st.sidebar.progress(progress)
 st.sidebar.write(f"💰 이번 달 수입: **{int(current_profit):,}원**")
 st.sidebar.write(f"🛵 이번 달 배달: **{int(current_count)}건**")
 
-new_goal = st.sidebar.number_input("목표 금액 (임시)", value=goal_amount, step=100000)
+new_goal = st.sidebar.number_input("목표 금액 (임시)", value=goal_amount, step=100000, format="%d")
 if st.sidebar.button("목표 설정"):
     set_user_goal(new_goal)
     st.rerun()
@@ -231,12 +230,14 @@ with tab1:
     with st.container(border=True):
         with st.form("work_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
+            # 날짜 한국식(.)
             date = col1.date_input("날짜", datetime.now(), format="YYYY.MM.DD", key=f"w_date_{st.session_state.form_id}")
             platform = col2.selectbox("플랫폼", ["쿠팡", "배민", "일반대행", "기타"], key=f"w_plat_{st.session_state.form_id}")
             
             c1, c2 = st.columns(2)
-            revenue = c1.number_input("금일 수입(원)", step=1000, key=f"w_rev_{st.session_state.form_id}")
-            count = c2.number_input("배달 건수", min_value=0, key=f"w_cnt_{st.session_state.form_id}")
+            # format="%d" -> .00 없이 깔끔한 정수 입력
+            revenue = c1.number_input("금일 수입(원)", step=1000, key=f"w_rev_{st.session_state.form_id}", format="%d")
+            count = c2.number_input("배달 건수", min_value=0, key=f"w_cnt_{st.session_state.form_id}", format="%d")
             
             memo = st.text_input("메모", key=f"w_mem_{st.session_state.form_id}")
             
@@ -247,8 +248,7 @@ with tab1:
                 else:
                     avg_price = 0
                 
-                # [변경] 저장 시 쉼표 포맷 적용
-                # 구글 시트에 "30,000" 문자열로 저장됨 -> 보기에 깔끔
+                # [저장 포맷팅] 쉼표 추가 (30,000)
                 fmt_revenue = "{:,}".format(int(revenue))
                 fmt_price = "{:,}".format(int(avg_price))
                 
@@ -278,16 +278,16 @@ with tab1:
             cols_to_hide = ['아이디', '비번']
             current_month_df = current_month_df.drop(columns=[c for c in cols_to_hide if c in current_month_df.columns])
 
-            # 평균단가 재계산 (화면 표시용)
-            current_month_df['평균단가'] = (current_month_df['수입'] / current_month_df['배달건수']).fillna(0)
-            current_month_df.loc[current_month_df['배달건수'] == 0, '평균단가'] = 0
+            # 화면 표시를 위해 쉼표 포맷팅 적용 (문자열로 변환)
+            current_month_df['수입'] = current_month_df['수입'].apply(lambda x: "{:,}".format(int(x)))
             
-            # 화면 표시용 포맷팅 (리스트에서도 쉼표 보이게)
-            # data_editor 수정 시 숫자가 필요하므로 여기서는 원본 유지하되, 
-            # 형님이 '저장' 누르면 다시 문자열로 변환될 수 있게 처리해야 함.
-            # 하지만 data_editor 특성상 숫자/문자가 섞이면 복잡해지므로, 
-            # 화면에서는 깔끔하게 보이되 수정은 숫자(콤마 없음)로 하는 게 안전하지만
-            # 형님 요청("구글시트에서도 적용")을 위해 문자열로 저장했으므로 그대로 보여줍니다.
+            # 평균단가 재계산 후 쉼표 적용
+            # 원본 데이터가 문자열일 수 있으므로 safe_numeric 한번 거침
+            temp_rev = safe_numeric(current_month_df['수입'])
+            temp_cnt = safe_numeric(current_month_df['배달건수'])
+            
+            current_month_df['평균단가'] = (temp_rev / temp_cnt).fillna(0).astype(int)
+            current_month_df['평균단가'] = current_month_df['평균단가'].apply(lambda x: "{:,}".format(int(x)))
 
             view_cols = ["날짜", "플랫폼", "수입", "배달건수", "평균단가", "메모"]
             final_view_cols = [c for c in view_cols if c in current_month_df.columns]
@@ -314,8 +314,7 @@ with tab1:
             
             if st.button("🔴 매출 수정/삭제 반영"):
                 with st.spinner("저장 중..."):
-                    # 수정된 데이터는 문자열일 수도 있고 숫자일 수도 있음
-                    # 안전하게 숫자로 변환 후 다시 포맷팅해서 저장
+                    # 수정된 데이터는 문자열(30,000)이므로 숫자로 변환
                     edited_df['수입'] = safe_numeric(edited_df['수입'])
                     edited_df['배달건수'] = safe_numeric(edited_df['배달건수'])
                     
@@ -325,7 +324,7 @@ with tab1:
                         axis=1
                     )
                     
-                    # [변경] 다시 쉼표 포맷 적용해서 저장
+                    # 저장 전 다시 쉼표 포맷팅
                     edited_df['수입'] = edited_df['수입'].apply(lambda x: "{:,}".format(int(x)))
                     edited_df['평균단가'] = edited_df['평균단가'].apply(lambda x: "{:,}".format(int(x)))
 
@@ -352,11 +351,11 @@ with tab2:
             col1, col2 = st.columns(2)
             d = col1.date_input("입금일", datetime.now(), format="YYYY.MM.DD", key=f"b_date_{st.session_state.form_id}")
             s = col2.selectbox("입금처", ["쿠팡", "배민", "기타"], key=f"b_src_{st.session_state.form_id}")
-            a = st.number_input("입금액", step=10000, key=f"b_amt_{st.session_state.form_id}")
+            a = st.number_input("입금액", step=10000, key=f"b_amt_{st.session_state.form_id}", format="%d")
             m = st.text_input("메모", key=f"b_mem_{st.session_state.form_id}")
             
             if st.form_submit_button("💾 입금 저장", type="primary"):
-                # [변경] 입금액 포맷팅
+                # 입금액 쉼표 포맷팅
                 fmt_amt = "{:,}".format(int(a))
                 save_new_entry(SHEET_BANK, [d, s, fmt_amt, m])
                 st.success("✅ 저장 완료!")
@@ -383,6 +382,9 @@ with tab2:
             cols_to_hide = ['아이디', '비번']
             current_month_bank_df = current_month_bank_df.drop(columns=[c for c in cols_to_hide if c in current_month_bank_df.columns])
             
+            # 화면 표시용 쉼표
+            current_month_bank_df['입금액'] = current_month_bank_df['입금액'].apply(lambda x: "{:,}".format(int(safe_numeric(pd.Series([x]))[0])))
+
             sorted_bank_view = current_month_bank_df.sort_values(by="입금날짜", ascending=False)
 
             edited_bank = st.data_editor(
@@ -403,7 +405,7 @@ with tab2:
             
             if st.button("🔴 입금 수정/삭제 반영"):
                 with st.spinner("저장 중..."):
-                    # 수정 시 다시 포맷팅
+                    # 저장 전 다시 포맷팅
                     edited_bank['입금액'] = safe_numeric(edited_bank['입금액']).apply(lambda x: "{:,}".format(int(x)))
 
                     df_bank['날짜_temp'] = pd.to_datetime(df_bank['입금날짜'], errors='coerce')
@@ -436,7 +438,6 @@ with tab3:
         col1, col2 = st.columns(2)
         if f"m_date" not in st.session_state: st.session_state["m_date"] = datetime.now()
         
-        # [수정됨] 날짜 포맷 한국식(.)으로 변경
         d = col1.date_input("날짜", datetime.now(), format="YYYY.MM.DD", key=f"m_date_{st.session_state.form_id}")
         selected_item = col2.selectbox("정비 항목", maint_items + ["직접 입력"], key=f"m_item_{st.session_state.form_id}")
         
@@ -445,7 +446,7 @@ with tab3:
         else:
             final_item = selected_item
             
-        c = st.number_input("비용(원)", step=1000, key=f"m_cost_{st.session_state.form_id}")
+        c = st.number_input("비용(원)", step=1000, key=f"m_cost_{st.session_state.form_id}", format="%d")
         k = st.text_input("현재 주행거리(Km)", key=f"m_km_{st.session_state.form_id}")
         m = st.text_input("정비 내용/메모", key=f"m_memo_{st.session_state.form_id}")
         
@@ -458,11 +459,9 @@ with tab3:
                 
                 # 거리 입력값 처리 (숫자만 추출해서 포맷팅)
                 try:
-                    # 입력값에서 숫자만 남기고 변환
                     raw_km = int(''.join(filter(str.isdigit, str(k))))
                     fmt_km = "{:,} km".format(raw_km)
                 except:
-                    # 숫자가 없으면 그냥 입력한대로 저장
                     fmt_km = str(k)
 
                 save_new_entry(SHEET_MAINT, [d, final_item, fmt_cost, fmt_km, m])
@@ -501,6 +500,9 @@ with tab3:
                 cols_to_hide = ['아이디', '비번']
                 current_month_maint_df = current_month_maint_df.drop(columns=[c for c in cols_to_hide if c in current_month_maint_df.columns])
                 
+                # 화면 표시용 쉼표 포맷팅
+                current_month_maint_df['금액'] = current_month_maint_df['금액'].apply(lambda x: "{:,}".format(int(safe_numeric(pd.Series([x]))[0])))
+
                 sorted_maint = current_month_maint_df.sort_values(by="날짜", ascending=False)
                 
                 edited_maint = st.data_editor(
@@ -521,11 +523,9 @@ with tab3:
                 
                 if st.button("🔴 정비 수정/삭제 반영"):
                     with st.spinner("저장 중..."):
-                        # 수정 시 다시 포맷팅
-                        # 1. 금액 포맷팅
+                        # 저장 전 포맷팅 (금액 쉼표, 거리 km 유지)
                         edited_maint['금액'] = safe_numeric(edited_maint['금액']).apply(lambda x: "{:,}".format(int(x)))
                         
-                        # 2. 거리 포맷팅 (km 유지)
                         def reformat_km(val):
                             try:
                                 num = int(''.join(filter(str.isdigit, str(val))))
@@ -605,8 +605,3 @@ with tab4:
                     st.info("데이터가 없습니다.")
             else:
                 st.info("데이터가 없습니다.")
-
-        else:
-             st.info("날짜 데이터가 충분하지 않습니다.")
-    else:
-        st.info("데이터가 없습니다.")
